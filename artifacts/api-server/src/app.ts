@@ -72,11 +72,17 @@ app.use("/api", router);
 
 // Serve frontend static files di production
 const frontendDist = path.resolve(__dirname, "../../xifil-hub/dist/public");
+logger.info({ frontendDist }, "Serving static files from");
 app.use(express.static(frontendDist));
 
 // Catch-all: semua route non-API diarahkan ke index.html (React Router)
 app.get("*", (_req, res) => {
-  res.sendFile(path.join(frontendDist, "index.html"));
+  const indexPath = path.join(frontendDist, "index.html");
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      res.status(200).send(`<h2>XiFil Hub API running</h2><p>Frontend not found at: ${indexPath}</p>`);
+    }
+  });
 });
 
 export default app;
