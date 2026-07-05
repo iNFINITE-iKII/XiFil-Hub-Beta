@@ -5,6 +5,7 @@ import gamesRouter from "./games.js";
 import keysRouter from "./keys.js";
 import adminRouter from "./admin.js";
 import licenseRouter from "./license.js";
+import loaderRouter from "./loader.js";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use("/games", gamesRouter);
 router.use("/keys", keysRouter);
 router.use("/admin", adminRouter);
 router.use("/license", licenseRouter);
+router.use("/loader", loaderRouter);
 
 export default router;

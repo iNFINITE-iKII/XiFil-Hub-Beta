@@ -30,8 +30,11 @@ export default function ScriptDetailPage() {
   const activeKeys = gameKeys.filter(k => k.status === 'active');
   const hasAccess = activeKeys.length > 0;
 
+  const baseUrl = window.location.origin;
+  const loaderUrl = `${baseUrl}/api/loader/${game.slug}`;
+
   const copyCode = () => {
-    const code = `getgenv().XiFil_Key = "YOUR_KEY_HERE"\nloadstring(game:HttpGet("https://xifil.hub/loader/${game.slug}"))()`;
+    const code = `loadstring(game:HttpGet("${loaderUrl}"))()`;
     navigator.clipboard.writeText(code);
   };
 
@@ -68,8 +71,7 @@ export default function ScriptDetailPage() {
                   <div className="relative group rounded-md overflow-hidden bg-black/50 border border-border">
                     <pre className="p-4 overflow-x-auto text-sm font-mono text-primary-foreground/90">
                       <code>
-                        <span className="text-purple-400">getgenv</span>().<span className="text-blue-400">XiFil_Key</span> = <span className="text-green-400">"YOUR_KEY_HERE"</span>{"\n"}
-                        <span className="text-purple-400">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"https://xifil.hub/loader/{game.slug}"</span>))()
+                        <span className="text-purple-400">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"{loaderUrl}"</span>))()
                       </code>
                     </pre>
                     <Button 
