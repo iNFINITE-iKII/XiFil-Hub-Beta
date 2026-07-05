@@ -2,6 +2,9 @@
 builder = "nixpacks"
 buildCommand = "BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/xifil-hub run build && pnpm --filter @workspace/api-server run build"
 
+[build.env]
+NIXPACKS_NODE_VERSION = "22"
+
 [deploy]
 startCommand = "pnpm --filter @workspace/api-server run start"
 healthcheckPath = "/api/healthz"
