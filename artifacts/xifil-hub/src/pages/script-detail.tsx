@@ -105,7 +105,7 @@ export default function ScriptDetailPage() {
                     </div>
                     <pre className="p-4 overflow-x-auto text-sm font-mono text-foreground/90 leading-relaxed selection:bg-primary selection:text-primary-foreground">
                       <code>
-                        <span className="text-primary">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"https://raw.githubusercontent.com/iNFINITE-iKII/XiFil-Hub-Beta/main/artifacts/api-server/lua/games/{game.slug}/loader.lua"</span>))()
+                        <span className="text-primary">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"{loaderUrl}"</span>))()
                       </code>
                     </pre>
                   </div>
