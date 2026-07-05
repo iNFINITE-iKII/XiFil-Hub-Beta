@@ -18,7 +18,8 @@ const isNeon = connectionString.includes("neon.tech");
 
 export const pool = new Pool({
   connectionString,
-  ssl: isNeon ? { rejectUnauthorized: false } : undefined,
+  // Neon requires SSL; use verified TLS (rejectUnauthorized defaults to true)
+  ssl: isNeon ? true : undefined,
 });
 export const db = drizzle(pool, { schema });
 

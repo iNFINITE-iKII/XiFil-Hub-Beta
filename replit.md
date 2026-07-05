@@ -1,45 +1,63 @@
-# [Project name]
+# XiFil Hub
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
-
-## Run & Operate
-
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+Full-stack monorepo: Express API + React frontend (Vite + Tailwind + Shadcn UI) + PostgreSQL via Neon.
 
 ## Stack
+- **Monorepo:** pnpm workspaces
+- **Backend:** Node.js 22+, Express 5, TypeScript
+- **Frontend:** React, Vite, Tailwind CSS, Shadcn UI
+- **Database:** Neon PostgreSQL + Drizzle ORM
+- **Auth:** Discord OAuth (session-based)
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+## Deployment: Railway + Neon
 
-## Where things live
+The project is configured to deploy on Railway via `railway.toml`.
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+### Railway Environment Variables
+Set these in the Railway dashboard under your service → Variables:
 
-## Architecture decisions
+| Variable | Required | Notes |
+|---|---|---|
+| `NEON_DATABASE_URL` | ✅ | Neon PostgreSQL connection string |
+| `SESSION_SECRET` | ✅ | Long random string for session signing |
+| `DISCORD_CLIENT_ID` | ✅ | From Discord Developer Portal |
+| `DISCORD_CLIENT_SECRET` | ✅ | From Discord Developer Portal |
+| `NODE_ENV` | ✅ | Set to `production` |
+| `APP_URL` | Optional | Your Railway public URL (fallback to `RAILWAY_PUBLIC_DOMAIN`) |
+| `LOG_LEVEL` | Optional | Defaults to `info` |
+| `PORT` | Auto | Set automatically by Railway — do not override |
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+### Discord OAuth Setup
+In the [Discord Developer Portal](https://discord.com/developers/applications), add this redirect URI:
+```
+https://<your-railway-domain>/api/auth/discord/callback
+```
 
-## Product
+### Database Migrations
+Run migrations with raw SQL (drizzle-kit push requires TTY — not suitable for CI):
+```bash
+node -e "require('./scripts/migrate.js')"
+```
+Or apply schema changes manually via Neon console.
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+## Development (local)
+```bash
+pnpm install
+# Copy .env.example to .env and fill in values
+pnpm --filter @workspace/api-server run dev
+pnpm --filter @workspace/xifil-hub run dev
+```
 
-## User preferences
+## Build
+```bash
+pnpm run build
+```
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+## Implemented Features (Fase 1)
+- Discord OAuth login
+- License key management (claim, HWID reset with cooldown, bulk generate, CSV export)
+- Roblox account linking (verified via Roblox API)
+- Admin panel (key management, settings, HWID force-reset)
+- Admin settings singleton (default duration, game ID, HWID reset limit/cooldown, key prefix)
 
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+## User Preferences
