@@ -54,7 +54,7 @@ app.use(
     store: new PgSession({
       pool,
       tableName: "user_sessions",
-      createTableIfMissing: false, // table already created via migration
+      createTableIfMissing: true,
     }),
     secret: sessionSecret,
     resave: false,
