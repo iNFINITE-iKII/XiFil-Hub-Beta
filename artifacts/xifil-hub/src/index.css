@@ -78,54 +78,54 @@
   --elevate-1: rgba(255, 255, 255, 0.04);
   --elevate-2: rgba(255, 255, 255, 0.09);
 
-  /* Industrial Amber & Obsidian theme */
-  --background: 20 10% 4%;
-  --foreground: 20 10% 98%;
-  --border: 20 10% 12%;
+  /* Industrial Sky Blue & Obsidian theme */
+  --background: 220 15% 4%;
+  --foreground: 220 10% 98%;
+  --border: 220 15% 12%;
   
-  --card: 20 10% 6%;
-  --card-foreground: 20 10% 98%;
-  --card-border: 20 10% 12%;
+  --card: 220 15% 6%;
+  --card-foreground: 220 10% 98%;
+  --card-border: 220 15% 12%;
   
-  --sidebar: 20 10% 5%;
-  --sidebar-foreground: 20 10% 90%;
-  --sidebar-border: 20 10% 10%;
-  --sidebar-primary: 35 100% 55%;
-  --sidebar-primary-foreground: 20 10% 5%;
-  --sidebar-accent: 20 10% 10%;
-  --sidebar-accent-foreground: 20 10% 98%;
-  --sidebar-ring: 35 100% 55%;
+  --sidebar: 220 15% 5%;
+  --sidebar-foreground: 220 10% 90%;
+  --sidebar-border: 220 15% 10%;
+  --sidebar-primary: 200 90% 60%;
+  --sidebar-primary-foreground: 220 15% 5%;
+  --sidebar-accent: 220 15% 10%;
+  --sidebar-accent-foreground: 220 10% 98%;
+  --sidebar-ring: 200 90% 60%;
   
-  --popover: 20 10% 6%;
-  --popover-foreground: 20 10% 98%;
-  --popover-border: 20 10% 12%;
+  --popover: 220 15% 6%;
+  --popover-foreground: 220 10% 98%;
+  --popover-border: 220 15% 12%;
   
-  --primary: 35 100% 55%; /* Vivid Amber */
-  --primary-foreground: 20 10% 5%;
+  --primary: 200 90% 60%; /* Sky Blue */
+  --primary-foreground: 220 15% 5%;
   
-  --secondary: 20 10% 12%;
-  --secondary-foreground: 20 10% 98%;
+  --secondary: 220 15% 12%;
+  --secondary-foreground: 220 10% 98%;
   
-  --muted: 20 10% 12%;
-  --muted-foreground: 20 10% 60%;
+  --muted: 220 15% 12%;
+  --muted-foreground: 220 10% 60%;
   
-  --accent: 35 100% 55%;
-  --accent-foreground: 20 10% 5%;
+  --accent: 200 90% 60%;
+  --accent-foreground: 220 15% 5%;
   
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
   
   --success: 142 71% 45%;
-  --success-foreground: 20 10% 5%;
+  --success-foreground: 220 15% 5%;
 
-  --input: 20 10% 12%;
-  --ring: 35 100% 55%;
+  --input: 220 15% 12%;
+  --ring: 200 90% 60%;
   
-  --chart-1: 35 100% 55%;
-  --chart-2: 20 10% 60%;
-  --chart-3: 35 80% 40%;
-  --chart-4: 20 10% 40%;
-  --chart-5: 35 60% 30%;
+  --chart-1: 200 90% 60%;
+  --chart-2: 220 10% 60%;
+  --chart-3: 200 80% 45%;
+  --chart-4: 220 10% 40%;
+  --chart-5: 200 60% 35%;
 
   --app-font-sans: 'Plus Jakarta Sans', sans-serif;
   --app-font-mono: 'Space Mono', monospace;

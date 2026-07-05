@@ -124,7 +124,7 @@ export default function LandingPage() {
           
           <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-bold tracking-tighter mb-6 text-foreground leading-[1.1]">
             Industrial-Grade <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-orange-300 text-glow">License Infrastructure</span>
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-sky-300 text-glow">License Infrastructure</span>
           </motion.h1>
           
           <motion.p variants={itemVariants} className="text-lg md:text-xl text-muted-foreground mb-10 max-w-2xl font-medium">
