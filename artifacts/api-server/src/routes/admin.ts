@@ -89,6 +89,73 @@ router.get("/keys", requireAdmin, async (req, res) => {
   );
 });
 
+// GET /api/admin/users/:id — full detail satu user beserta semua key-nya
+router.get("/users/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid user ID" });
+    return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const keyRows = await db
+    .select({ key: licenseKeysTable, game: gamesTable })
+    .from(licenseKeysTable)
+    .leftJoin(gamesTable, eq(licenseKeysTable.gameId, gamesTable.id))
+    .where(eq(licenseKeysTable.userId, id))
+    .orderBy(licenseKeysTable.createdAt);
+
+  res.json({
+    id: user.id,
+    discordId: user.discordId,
+    username: user.username,
+    avatar: user.avatar,
+    isAdmin: user.isAdmin,
+    robloxUsername: user.robloxUsername,
+    robloxId: user.robloxId,
+    createdAt: user.createdAt.toISOString(),
+    keys: keyRows.map((r) => ({
+      id: r.key.id,
+      key: r.key.key,
+      gameId: r.key.gameId,
+      gameName: r.game?.name ?? null,
+      hwid: r.key.hwid,
+      status: r.key.status,
+      expiresAt: r.key.expiresAt ? r.key.expiresAt.toISOString() : null,
+      hwidResetCount: r.key.hwidResetCount,
+      hwidLastResetAt: r.key.hwidLastResetAt ? r.key.hwidLastResetAt.toISOString() : null,
+      createdAt: r.key.createdAt.toISOString(),
+    })),
+  });
+});
+
+// POST /api/admin/users/:id/reset-roblox — hapus link Roblox seorang user
+router.post("/users/:id/reset-roblox", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid user ID" });
+    return;
+  }
+
+  const [user] = await db
+    .update(usersTable)
+    .set({ robloxUsername: null, robloxId: null })
+    .where(eq(usersTable.id, id))
+    .returning();
+
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  res.json({ message: "Roblox account unlinked" });
+});
+
 // GET /api/admin/settings
 router.get("/settings", requireAdmin, async (req, res) => {
   const settings = await getOrCreateSettings();

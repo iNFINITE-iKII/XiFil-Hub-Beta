@@ -7,6 +7,7 @@ import adminRouter from "./admin.js";
 import licenseRouter from "./license.js";
 import loaderRouter from "./loader.js";
 import luaRouter from "./lua.js";
+import drmRouter from "./drm.js";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use("/admin", adminRouter);
 router.use("/license", licenseRouter);
 router.use("/loader", loaderRouter);
 router.use("/lua", luaRouter);
+router.use("/drm", drmRouter);
 
 export default router;

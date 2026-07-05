@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, ShieldAlert, Users, KeyRound, Activity, Terminal, Download, Layers, RotateCcw, Settings, CheckCircle2 } from "lucide-react";
+import { Loader2, ShieldAlert, Users, KeyRound, Activity, Terminal, Download, Layers, RotateCcw, Settings, CheckCircle2, Eye, UserX, Copy } from "lucide-react";
 import { motion } from "framer-motion";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -40,6 +40,9 @@ export default function AdminPage() {
   const [bulkData, setBulkData] = useState({ gameId: "", count: "10", days: "" });
   const [bulkResult, setBulkResult] = useState<{ count: number } | null>(null);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [copiedHwid, setCopiedHwid] = useState<string | null>(null);
   const [settingsForm, setSettingsForm] = useState({
     defaultDurationDays: "",
     defaultGameId: "",
@@ -97,9 +100,11 @@ export default function AdminPage() {
   });
 
   const adminHwidResetMutation = useMutation({
-    mutationFn: async (keyId: number) => {
+    mutationFn: async ({ keyId, clearRoblox }: { keyId: number; clearRoblox?: boolean }) => {
       const res = await fetch(apiUrl(`/api/keys/${keyId}/reset-hwid`), {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clearRoblox: !!clearRoblox }),
         credentials: "include",
       });
       const json = await res.json();
@@ -108,7 +113,35 @@ export default function AdminPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: getListAdminKeysQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+      queryClient.invalidateQueries({ queryKey: ["admin-user-detail", selectedUserId] });
     },
+  });
+
+  const resetRobloxMutation = useMutation({
+    mutationFn: async (userId: number) => {
+      const res = await fetch(apiUrl(`/api/admin/users/${userId}/reset-roblox`), {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+      queryClient.invalidateQueries({ queryKey: ["admin-user-detail", selectedUserId] });
+    },
+  });
+
+  const { data: userDetail, isLoading: isDetailLoading } = useQuery({
+    queryKey: ["admin-user-detail", selectedUserId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/admin/users/${selectedUserId}`), { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch user detail");
+      return res.json();
+    },
+    enabled: isDetailOpen && selectedUserId !== null,
   });
 
   const saveSettingsMutation = useMutation({
@@ -289,7 +322,8 @@ export default function AdminPage() {
                           <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Operator</TableHead>
                           <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Roblox</TableHead>
                           <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Clearance</TableHead>
-                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 text-right px-6">Init Date</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Init Date</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 text-right px-6">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -316,7 +350,38 @@ export default function AdminPage() {
                                 <Badge variant="outline" className="rounded-none border-muted text-muted-foreground font-mono text-[9px] uppercase px-1.5 py-0">USER</Badge>
                               }
                             </TableCell>
-                            <TableCell className="text-xs font-mono text-muted-foreground text-right px-6">{new Date(u.createdAt).toLocaleDateString()}</TableCell>
+                            <TableCell className="text-xs font-mono text-muted-foreground">{new Date(u.createdAt).toLocaleDateString()}</TableCell>
+                            <TableCell className="text-right px-6">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] font-mono uppercase border-border hover:border-primary hover:text-primary rounded-none gap-1"
+                                  onClick={() => { setSelectedUserId(u.id); setIsDetailOpen(true); }}
+                                  title="Lihat detail lengkap"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  Detail
+                                </Button>
+                                {u.robloxUsername && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-[10px] font-mono uppercase border-orange-500/50 text-orange-500 hover:bg-orange-500 hover:text-white rounded-none gap-1"
+                                    onClick={() => {
+                                      if (confirm(`Reset akun Roblox "${u.robloxUsername}" dari user ${u.username}?`)) {
+                                        resetRobloxMutation.mutate(u.id);
+                                      }
+                                    }}
+                                    disabled={resetRobloxMutation.isPending}
+                                    title="Hapus link Roblox"
+                                  >
+                                    <UserX className="w-3 h-3" />
+                                    Roblox
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -377,7 +442,7 @@ export default function AdminPage() {
                                     variant="outline"
                                     size="sm"
                                     className="h-7 text-[10px] font-mono uppercase border-border hover:border-primary hover:text-primary rounded-none gap-1"
-                                    onClick={() => adminHwidResetMutation.mutate(k.id)}
+                                    onClick={() => adminHwidResetMutation.mutate({ keyId: k.id })}
                                     disabled={adminHwidResetMutation.isPending}
                                     title="Reset HWID"
                                   >
@@ -590,6 +655,181 @@ export default function AdminPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* USER DETAIL MODAL */}
+      <Dialog open={isDetailOpen} onOpenChange={(open) => { setIsDetailOpen(open); if (!open) setSelectedUserId(null); }}>
+        <DialogContent className="border-border bg-background rounded-sm shadow-2xl p-0 overflow-hidden sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+          <DialogHeader className="p-6 pb-4 border-b border-border bg-secondary/30">
+            <DialogTitle className="font-mono uppercase tracking-wider text-foreground flex items-center gap-2">
+              <Eye className="w-4 h-4 text-primary" /> User Detail
+            </DialogTitle>
+            <DialogDescription className="font-mono text-xs mt-1 text-muted-foreground">
+              Informasi lengkap operator — identitas, Roblox, dan semua lisensi.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="p-6 space-y-6">
+            {isDetailLoading ? (
+              <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary w-6 h-6" /></div>
+            ) : userDetail ? (
+              <>
+                {/* Identity */}
+                <div className="space-y-3">
+                  <p className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider border-b border-border pb-1">Discord Identity</p>
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={userDetail.avatar ? `https://cdn.discordapp.com/avatars/${userDetail.discordId}/${userDetail.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`}
+                      alt=""
+                      className="w-10 h-10 border border-border"
+                    />
+                    <div>
+                      <p className="font-bold text-foreground">{userDetail.username}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground">Discord ID: {userDetail.discordId}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground">Bergabung: {new Date(userDetail.createdAt).toLocaleString()}</p>
+                    </div>
+                    {userDetail.isAdmin && (
+                      <Badge variant="outline" className="ml-auto rounded-none border-primary text-primary bg-primary/10 font-mono text-[9px] uppercase px-1.5 py-0">SYS_ADMIN</Badge>
+                    )}
+                  </div>
+                </div>
+
+                {/* Roblox */}
+                <div className="space-y-3">
+                  <p className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider border-b border-border pb-1">Roblox Account</p>
+                  {userDetail.robloxUsername ? (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-mono text-sm text-foreground">{userDetail.robloxUsername}</p>
+                        <p className="font-mono text-[10px] text-muted-foreground">Roblox ID: {userDetail.robloxId ?? "—"}</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[10px] font-mono uppercase border-orange-500/50 text-orange-500 hover:bg-orange-500 hover:text-white rounded-none gap-1"
+                        onClick={() => {
+                          if (confirm(`Reset akun Roblox "${userDetail.robloxUsername}"?`)) {
+                            resetRobloxMutation.mutate(userDetail.id);
+                          }
+                        }}
+                        disabled={resetRobloxMutation.isPending}
+                      >
+                        <UserX className="w-3 h-3" /> Reset Roblox
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="font-mono text-xs text-muted-foreground/50 uppercase">Belum terhubung</p>
+                  )}
+                </div>
+
+                {/* Keys */}
+                <div className="space-y-3">
+                  <p className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider border-b border-border pb-1">
+                    Lisensi ({userDetail.keys?.length ?? 0})
+                  </p>
+                  {userDetail.keys?.length === 0 ? (
+                    <p className="font-mono text-xs text-muted-foreground/50 uppercase">Tidak ada lisensi</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {userDetail.keys?.map((k: any) => (
+                        <div key={k.id} className="border border-border bg-secondary/20 p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[11px] text-foreground truncate">{k.key}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 rounded-none hover:bg-primary/20 hover:text-primary"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(k.key);
+                                  setCopiedHwid(k.id + "-key");
+                                  setTimeout(() => setCopiedHwid(null), 1500);
+                                }}
+                                title="Copy license string"
+                              >
+                                {copiedHwid === k.id + "-key" ? <CheckCircle2 className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                              </Button>
+                              <Badge variant="outline" className={`rounded-none font-mono text-[9px] uppercase px-1.5 py-0 border ${k.status === "active" ? "border-primary text-primary bg-primary/10" : k.status === "revoked" ? "border-destructive text-destructive bg-destructive/10" : "border-muted text-muted-foreground"}`}>
+                                {k.status}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono text-muted-foreground">
+                            <span>Module: <span className="text-foreground">{k.gameName ?? "—"}</span></span>
+                            <span>Expires: <span className="text-foreground">{k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : "∞"}</span></span>
+                            <span>HWID Resets: <span className="text-foreground">{k.hwidResetCount}</span></span>
+                            <span>Claimed: <span className="text-foreground">{new Date(k.createdAt).toLocaleDateString()}</span></span>
+                          </div>
+                          {/* HWID */}
+                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/50">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono text-[9px] uppercase text-muted-foreground shrink-0">HWID:</span>
+                              {k.hwid ? (
+                                <span className="font-mono text-[10px] text-foreground truncate" title={k.hwid}>{k.hwid}</span>
+                              ) : (
+                                <span className="font-mono text-[9px] text-muted-foreground/50 uppercase">unbound</span>
+                              )}
+                            </div>
+                            {k.hwid && (
+                              <div className="flex gap-1 shrink-0">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-none hover:bg-primary/20 hover:text-primary"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(k.hwid);
+                                    setCopiedHwid(k.id + "-hwid");
+                                    setTimeout(() => setCopiedHwid(null), 1500);
+                                  }}
+                                  title="Copy HWID"
+                                >
+                                  {copiedHwid === k.id + "-hwid" ? <CheckCircle2 className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[9px] font-mono uppercase border-border hover:border-primary hover:text-primary rounded-none gap-1 px-2"
+                                  onClick={() => {
+                                    if (confirm("Reset HWID key ini?")) {
+                                      adminHwidResetMutation.mutate({ keyId: k.id });
+                                    }
+                                  }}
+                                  disabled={adminHwidResetMutation.isPending}
+                                  title="Reset HWID"
+                                >
+                                  <RotateCcw className="w-3 h-3" /> Reset HWID
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[9px] font-mono uppercase border-orange-500/50 text-orange-500 hover:bg-orange-500 hover:text-white rounded-none gap-1 px-2"
+                                  onClick={() => {
+                                    if (confirm("Reset HWID + hapus link Roblox pemilik key ini?")) {
+                                      adminHwidResetMutation.mutate({ keyId: k.id, clearRoblox: true });
+                                    }
+                                  }}
+                                  disabled={adminHwidResetMutation.isPending}
+                                  title="Reset HWID + Roblox"
+                                >
+                                  <UserX className="w-3 h-3" /> +Roblox
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </div>
+          <div className="p-4 border-t border-border bg-secondary/20 flex justify-end">
+            <Button variant="outline" className="rounded-none font-mono text-xs uppercase border-border hover:bg-secondary h-9" onClick={() => setIsDetailOpen(false)}>
+              Tutup
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

@@ -273,8 +273,11 @@ router.get("/export", requireAdmin, async (req, res) => {
 });
 
 // POST /api/keys/:id/reset-hwid — admin resets HWID for any key
+// Optional body: { clearRoblox?: boolean } — jika true, juga hapus link Roblox pemilik key
 router.post("/:id/reset-hwid", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id);
+  const { clearRoblox } = req.body as { clearRoblox?: boolean };
+
   const [updated] = await db
     .update(licenseKeysTable)
     .set({ hwid: null, hwidResetCount: 0, hwidLastResetAt: null })
@@ -284,6 +287,14 @@ router.post("/:id/reset-hwid", requireAdmin, async (req, res): Promise<void> => 
   if (!updated) {
     res.status(404).json({ error: "Key not found" });
     return;
+  }
+
+  // Jika diminta, hapus juga link Roblox pemilik key
+  if (clearRoblox && updated.userId) {
+    await db
+      .update(usersTable)
+      .set({ robloxUsername: null, robloxId: null })
+      .where(eq(usersTable.id, updated.userId));
   }
 
   const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
