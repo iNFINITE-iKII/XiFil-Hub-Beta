@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "XiFil Hub"
+version = "1.0.0"
+id = "artifacts/xifil-hub"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25201
+
+[services.development]
+run = "pnpm --filter @workspace/xifil-hub run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/xifil-hub", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/xifil-hub/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25201"
+BASE_PATH = "/"

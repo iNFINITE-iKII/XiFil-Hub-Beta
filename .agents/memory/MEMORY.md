@@ -1,0 +1,2 @@
+- [XiFil Hub Discord OAuth](xifil-hub-discord-oauth.md) — OAuth state CSRF param required; callback validates session.oauthState before accepting code.
+- [XiFil Hub DB schema](xifil-hub-db-schema.md) — uses Replit built-in PostgreSQL (DATABASE_URL), not Neon directly; user can point to Neon in prod.
