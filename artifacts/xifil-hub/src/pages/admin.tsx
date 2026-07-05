@@ -415,7 +415,24 @@ export default function AdminPage() {
                       <TableBody>
                         {keys?.map((k: any) => (
                           <TableRow key={k.id} className="border-border hover:bg-secondary/20 transition-colors">
-                            <TableCell className="font-mono text-[11px] text-foreground max-w-[150px] truncate px-6" title={k.key}>{k.key}</TableCell>
+                            <TableCell className="px-6">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-[11px] text-foreground truncate max-w-[130px]" title={k.key}>{k.key}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 rounded-none hover:bg-primary/20 hover:text-primary shrink-0"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(k.key);
+                                    setCopiedHwid(k.id + "-admin-key");
+                                    setTimeout(() => setCopiedHwid(null), 1500);
+                                  }}
+                                  title="Copy license string"
+                                >
+                                  {copiedHwid === k.id + "-admin-key" ? <CheckCircle2 className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                                </Button>
+                              </div>
+                            </TableCell>
                             <TableCell className="text-sm text-foreground font-medium">{k.gameName}</TableCell>
                             <TableCell className="text-sm font-bold">
                               {k.userId ? <span className="text-foreground">{k.username}</span> : <span className="text-muted-foreground font-mono text-xs uppercase">Unassigned</span>}
