@@ -76,7 +76,7 @@ logger.info({ frontendDist }, "Serving static files from");
 app.use(express.static(frontendDist));
 
 // Catch-all: semua route non-API diarahkan ke index.html (React Router)
-app.get("*", (_req, res) => {
+app.get("/*splat", (_req, res) => {
   const indexPath = path.join(frontendDist, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
