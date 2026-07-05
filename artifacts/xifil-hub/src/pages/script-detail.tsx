@@ -30,8 +30,7 @@ export default function ScriptDetailPage() {
   const activeKeys = gameKeys.filter(k => k.status === 'active');
   const hasAccess = activeKeys.length > 0;
 
-  const baseUrl = window.location.origin;
-  const loaderUrl = `${baseUrl}/api/loader/${game.slug}`;
+  const loaderUrl = `https://xifil-hub-production.up.railway.app/api/lua/loader?game=${game.slug}`;
 
   const copyCode = () => {
     const code = `loadstring(game:HttpGet("${loaderUrl}"))()`;
