@@ -30,7 +30,7 @@ export default function ScriptDetailPage() {
   const activeKeys = gameKeys.filter(k => k.status === 'active');
   const hasAccess = activeKeys.length > 0;
 
-  const loaderUrl = `https://xifil-hub-production.up.railway.app/api/lua/loader?game=${game.slug}`;
+  const loaderUrl = `https://raw.githubusercontent.com/iNFINITE-iKII/XiFil-Hub-Beta/main/artifacts/api-server/lua/games/${game.slug}/loader.lua`;
 
   const copyCode = () => {
     const code = `loadstring(game:HttpGet("${loaderUrl}"))()`;
@@ -70,7 +70,7 @@ export default function ScriptDetailPage() {
                   <div className="relative group rounded-md overflow-hidden bg-black/50 border border-border">
                     <pre className="p-4 overflow-x-auto text-sm font-mono text-primary-foreground/90">
                       <code>
-                        <span className="text-purple-400">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"{loaderUrl}"</span>))()
+                        <span className="text-purple-400">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"https://raw.githubusercontent.com/iNFINITE-iKII/XiFil-Hub-Beta/main/artifacts/api-server/lua/games/{game.slug}/loader.lua"</span>))()
                       </code>
                     </pre>
                     <Button 
