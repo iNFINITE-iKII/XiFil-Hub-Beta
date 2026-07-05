@@ -1,15 +1,29 @@
 import React, { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetMe, getGetMeQueryKey } from "@workspace/api-client-react";
-import { Terminal, Shield, Zap, Lock, Code2, Cpu } from "lucide-react";
+import { Terminal, Shield, Zap, Code2, Cpu, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid_state: "Session CSRF state mismatch. Please try again.",
+  session_failed: "Failed to save session. Please try again.",
+  token_failed: "Discord token exchange failed. Check your Discord app settings.",
+  user_fetch_failed: "Could not fetch Discord user info.",
+  missing_code: "OAuth code missing from Discord callback.",
+  not_configured: "Discord OAuth is not configured on the server.",
+  oauth_error: "An unexpected OAuth error occurred. Please try again.",
+};
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
   const { data: user, isLoading } = useGetMe({
     query: { retry: false, queryKey: getGetMeQueryKey() }
   });
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const errorCode = urlParams.get("error");
+  const errorMessage = errorCode ? (ERROR_MESSAGES[errorCode] ?? `Unknown error: ${errorCode}`) : null;
 
   useEffect(() => {
     if (user && !isLoading) {
@@ -93,6 +107,13 @@ export default function LandingPage() {
           animate="visible"
           className="max-w-4xl mx-auto flex flex-col items-center"
         >
+          {errorMessage && (
+            <motion.div variants={itemVariants} className="flex items-center gap-3 px-4 py-3 bg-destructive/10 border border-destructive/40 text-destructive font-mono text-xs mb-8 max-w-lg w-full">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>[ERROR_{errorCode?.toUpperCase()}] {errorMessage}</span>
+            </motion.div>
+          )}
+
           <motion.div variants={itemVariants} className="inline-flex items-center gap-2 px-3 py-1 bg-secondary border border-border text-primary font-mono text-[10px] uppercase tracking-widest mb-8">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full bg-primary opacity-75"></span>
