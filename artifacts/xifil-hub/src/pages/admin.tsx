@@ -12,7 +12,6 @@ import {
   getListAdminKeysQueryKey,
   getListAdminUsersQueryKey,
   getListGamesQueryKey,
-  getGetMeQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
@@ -24,7 +23,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, ShieldAlert, Users, KeyRound, Gamepad2, AlertTriangle } from "lucide-react";
+import { Loader2, ShieldAlert, Users, KeyRound, Gamepad2, Activity, Terminal } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function AdminPage() {
   const queryClient = useQueryClient();
@@ -73,7 +73,7 @@ export default function AdminPage() {
   };
 
   const handleRevoke = (id: number) => {
-    if (confirm("Are you sure you want to revoke this key?")) {
+    if (confirm("Execute revocation protocol? This action is irreversible.")) {
       revokeKey.mutate({ id }, {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListAdminKeysQueryKey() });
@@ -85,203 +85,242 @@ export default function AdminPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-8"
+      >
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-border pb-6">
           <div>
-            <h1 className="text-3xl font-bold font-mono tracking-tight text-destructive flex items-center gap-3">
-              <ShieldAlert className="w-8 h-8" /> System Admin
-            </h1>
-            <p className="text-muted-foreground">Elevated access: Manage users, keys, and hub statistics.</p>
+            <div className="flex items-center gap-3 mb-2">
+              <ShieldAlert className="w-6 h-6 text-primary" /> 
+              <h1 className="text-3xl font-bold font-mono tracking-tight text-foreground uppercase">System Admin</h1>
+            </div>
+            <p className="text-sm text-muted-foreground font-mono">Elevated access: Infrastructure monitoring and control.</p>
           </div>
           {activeTab === 'keys' && (
-            <Button onClick={() => setIsGenerateOpen(true)} className="font-mono">
-              + Generate Key
+            <Button 
+              onClick={() => setIsGenerateOpen(true)} 
+              className="font-mono text-xs uppercase tracking-wider rounded-none h-9"
+            >
+              + Instantiate Key
             </Button>
           )}
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-4">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="keys">Keys</TabsTrigger>
+          <TabsList className="mb-6 bg-secondary border border-border rounded-none h-10">
+            <TabsTrigger value="overview" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Telemetry</TabsTrigger>
+            <TabsTrigger value="users" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Operators</TabsTrigger>
+            <TabsTrigger value="keys" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Licenses</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview">
+          <TabsContent value="overview" className="mt-0">
             {isStatsLoading ? (
-              <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>
+              <div className="flex justify-center py-20"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+                <Card className="border-border bg-card shadow-none rounded-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 bg-secondary/20">
+                    <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Total Ops</CardTitle>
                     <Users className="w-4 h-4 text-muted-foreground" />
                   </CardHeader>
-                  <CardContent><div className="text-2xl font-bold font-mono">{stats?.totalUsers || 0}</div></CardContent>
+                  <CardContent className="pt-4">
+                    <div className="text-3xl font-bold font-mono text-foreground">{stats?.totalUsers || 0}</div>
+                  </CardContent>
                 </Card>
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium">Total Keys</CardTitle>
+                <Card className="border-border bg-card shadow-none rounded-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 bg-secondary/20">
+                    <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Total Keys</CardTitle>
                     <KeyRound className="w-4 h-4 text-muted-foreground" />
                   </CardHeader>
-                  <CardContent><div className="text-2xl font-bold font-mono">{stats?.totalKeys || 0}</div></CardContent>
+                  <CardContent className="pt-4">
+                    <div className="text-3xl font-bold font-mono text-foreground">{stats?.totalKeys || 0}</div>
+                  </CardContent>
                 </Card>
-                <Card className="border-primary/30">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-primary">Active Keys</CardTitle>
-                    <ActivityIcon className="w-4 h-4 text-primary" />
+                <Card className="border-primary/50 bg-primary/5 shadow-none rounded-sm relative overflow-hidden box-glow">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-primary"></div>
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 pl-6 bg-primary/10 border-b border-primary/20">
+                    <CardTitle className="text-xs font-mono uppercase tracking-wider text-primary">Active Keys</CardTitle>
+                    <Activity className="w-4 h-4 text-primary" />
                   </CardHeader>
-                  <CardContent><div className="text-2xl font-bold font-mono text-primary">{stats?.activeKeys || 0}</div></CardContent>
+                  <CardContent className="pt-4 pl-6">
+                    <div className="text-3xl font-bold font-mono text-primary">{stats?.activeKeys || 0}</div>
+                  </CardContent>
                 </Card>
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium">Games</CardTitle>
-                    <Gamepad2 className="w-4 h-4 text-muted-foreground" />
+                <Card className="border-border bg-card shadow-none rounded-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 bg-secondary/20">
+                    <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Modules</CardTitle>
+                    <Terminal className="w-4 h-4 text-muted-foreground" />
                   </CardHeader>
-                  <CardContent><div className="text-2xl font-bold font-mono">{stats?.totalGames || 0}</div></CardContent>
+                  <CardContent className="pt-4">
+                    <div className="text-3xl font-bold font-mono text-foreground">{stats?.totalGames || 0}</div>
+                  </CardContent>
                 </Card>
               </div>
             )}
           </TabsContent>
 
-          <TabsContent value="users">
-            <Card>
+          <TabsContent value="users" className="mt-0">
+            <Card className="border-border bg-card shadow-none rounded-sm">
               <CardContent className="p-0">
                 {isUsersLoading ? (
-                  <div className="flex justify-center p-12"><Loader2 className="animate-spin text-primary" /></div>
+                  <div className="flex justify-center py-20"><Loader2 className="animate-spin text-primary w-6 h-6" /></div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>ID</TableHead>
-                        <TableHead>Discord User</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Joined</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {users?.map(u => (
-                        <TableRow key={u.id}>
-                          <TableCell className="font-mono text-xs">{u.id}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <img src={u.avatar ? `https://cdn.discordapp.com/avatars/${u.discordId}/${u.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`} alt="" className="w-6 h-6 rounded-full" />
-                              {u.username} <span className="text-xs text-muted-foreground">({u.discordId})</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {u.isAdmin ? <Badge variant="destructive">Admin</Badge> : <Badge variant="secondary">User</Badge>}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{new Date(u.createdAt).toLocaleDateString()}</TableCell>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-border bg-secondary/30">
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 px-6">UID</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Operator</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Clearance</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 text-right px-6">Init Date</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {users?.map(u => (
+                          <TableRow key={u.id} className="border-border hover:bg-secondary/20 transition-colors">
+                            <TableCell className="font-mono text-xs text-muted-foreground px-6">{u.id.toString().padStart(4, '0')}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <img src={u.avatar ? `https://cdn.discordapp.com/avatars/${u.discordId}/${u.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`} alt="" className="w-6 h-6 border border-border grayscale hover:grayscale-0 transition-all" />
+                                <span className="font-bold text-sm text-foreground">{u.username}</span> 
+                                <span className="text-[10px] font-mono text-muted-foreground">({u.discordId})</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {u.isAdmin ? 
+                                <Badge variant="outline" className="rounded-none border-primary text-primary bg-primary/10 font-mono text-[9px] uppercase px-1.5 py-0">SYS_ADMIN</Badge> : 
+                                <Badge variant="outline" className="rounded-none border-muted text-muted-foreground font-mono text-[9px] uppercase px-1.5 py-0">USER</Badge>
+                              }
+                            </TableCell>
+                            <TableCell className="text-xs font-mono text-muted-foreground text-right px-6">{new Date(u.createdAt).toLocaleDateString()}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="keys">
-            <Card>
+          <TabsContent value="keys" className="mt-0">
+            <Card className="border-border bg-card shadow-none rounded-sm">
               <CardContent className="p-0">
                 {isKeysLoading ? (
-                  <div className="flex justify-center p-12"><Loader2 className="animate-spin text-primary" /></div>
+                  <div className="flex justify-center py-20"><Loader2 className="animate-spin text-primary w-6 h-6" /></div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Key</TableHead>
-                        <TableHead>Game</TableHead>
-                        <TableHead>Owner</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {keys?.map(k => (
-                        <TableRow key={k.id}>
-                          <TableCell className="font-mono text-xs max-w-[150px] truncate" title={k.key}>{k.key}</TableCell>
-                          <TableCell className="text-sm">{k.gameName}</TableCell>
-                          <TableCell className="text-sm">
-                            {k.userId ? <span className="text-primary">{k.username}</span> : <span className="text-muted-foreground italic">Unassigned</span>}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={k.status === 'active' ? 'success' : k.status === 'revoked' ? 'destructive' : 'secondary'}>{k.status}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            {k.status === 'active' && (
-                              <Button variant="destructive" size="sm" onClick={() => handleRevoke(k.id)} disabled={revokeKey.isPending}>
-                                Revoke
-                              </Button>
-                            )}
-                          </TableCell>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-border bg-secondary/30">
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 px-6">License String</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Module</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Owner</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Status</TableHead>
+                          <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 text-right px-6">Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {keys?.map(k => (
+                          <TableRow key={k.id} className="border-border hover:bg-secondary/20 transition-colors">
+                            <TableCell className="font-mono text-[11px] text-foreground max-w-[150px] truncate px-6" title={k.key}>{k.key}</TableCell>
+                            <TableCell className="text-sm text-foreground font-medium">{k.gameName}</TableCell>
+                            <TableCell className="text-sm font-bold">
+                              {k.userId ? <span className="text-foreground">{k.username}</span> : <span className="text-muted-foreground font-mono text-xs uppercase">Unassigned</span>}
+                            </TableCell>
+                            <TableCell>
+                              <Badge 
+                                variant="outline" 
+                                className={`rounded-none font-mono text-[9px] uppercase px-1.5 py-0 border ${
+                                  k.status === 'active' ? 'border-primary text-primary bg-primary/10' : 
+                                  k.status === 'revoked' ? 'border-destructive text-destructive bg-destructive/10' : 
+                                  'border-muted text-muted-foreground'
+                                }`}
+                              >
+                                {k.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right px-6">
+                              {k.status === 'active' && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-7 text-[10px] font-mono uppercase border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground rounded-none"
+                                  onClick={() => handleRevoke(k.id)} 
+                                  disabled={revokeKey.isPending}
+                                >
+                                  Revoke
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
-      </div>
+      </motion.div>
 
       {isGenerateOpen && (
         <Dialog open={isGenerateOpen} onOpenChange={setIsGenerateOpen}>
-          <DialogHeader>
-            <DialogTitle>Generate New Key</DialogTitle>
-            <DialogDescription>Create a new license key. It can be unassigned or assigned directly to a user.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleGenerate} className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Game</Label>
-              <select 
-                className="flex h-10 w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                value={formData.gameId} 
-                onChange={e => setFormData({...formData, gameId: e.target.value})}
-                required
-              >
-                <option value="">Select a game...</option>
-                {games?.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Assign to User ID (Optional)</Label>
-              <Input 
-                type="number" 
-                placeholder="Leave blank for unassigned" 
-                value={formData.userId}
-                onChange={e => setFormData({...formData, userId: e.target.value})}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Duration in Days (Optional)</Label>
-              <Input 
-                type="number" 
-                placeholder="Leave blank for lifetime" 
-                value={formData.days}
-                onChange={e => setFormData({...formData, days: e.target.value})}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsGenerateOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={generateKey.isPending || !formData.gameId}>
-                {generateKey.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                Generate
-              </Button>
-            </DialogFooter>
-          </form>
+          <DialogContent className="border-border bg-background rounded-sm shadow-2xl p-0 overflow-hidden sm:max-w-md">
+            <div className="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+            <DialogHeader className="p-6 pb-4 border-b border-border bg-secondary/30">
+              <DialogTitle className="font-mono uppercase tracking-wider text-foreground">Instantiate Key</DialogTitle>
+              <DialogDescription className="font-mono text-xs mt-2 text-muted-foreground">Configure payload parameters for new license generation.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleGenerate} className="p-6 space-y-4">
+              <div className="space-y-2">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Target Module</Label>
+                <select 
+                  className="flex h-10 w-full rounded-none border border-border bg-secondary/50 px-3 py-2 text-sm font-mono focus-visible:outline-none focus-visible:border-primary text-foreground transition-colors"
+                  value={formData.gameId} 
+                  onChange={e => setFormData({...formData, gameId: e.target.value})}
+                  required
+                >
+                  <option value="">Select a module...</option>
+                  {games?.map(g => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Operator UID (Optional)</Label>
+                <Input 
+                  type="number" 
+                  className="rounded-none border-border bg-secondary/50 font-mono focus-visible:ring-0 focus-visible:border-primary transition-colors h-10"
+                  placeholder="Leave blank for unassigned" 
+                  value={formData.userId}
+                  onChange={e => setFormData({...formData, userId: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Duration / Days (Optional)</Label>
+                <Input 
+                  type="number" 
+                  className="rounded-none border-border bg-secondary/50 font-mono focus-visible:ring-0 focus-visible:border-primary transition-colors h-10"
+                  placeholder="Leave blank for lifetime" 
+                  value={formData.days}
+                  onChange={e => setFormData({...formData, days: e.target.value})}
+                />
+              </div>
+              <div className="pt-4 flex justify-end gap-2">
+                <Button type="button" variant="outline" className="rounded-none font-mono text-xs uppercase border-border hover:bg-secondary h-9" onClick={() => setIsGenerateOpen(false)}>Abort</Button>
+                <Button type="submit" className="rounded-none font-mono text-xs uppercase h-9" disabled={generateKey.isPending || !formData.gameId}>
+                  {generateKey.isPending && <Loader2 className="w-3 h-3 mr-2 animate-spin" />}
+                  Execute
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
         </Dialog>
       )}
     </AppLayout>
-  );
-}
-
-function ActivityIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
   );
 }

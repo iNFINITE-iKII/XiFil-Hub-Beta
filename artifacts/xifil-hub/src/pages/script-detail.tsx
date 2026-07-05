@@ -1,11 +1,12 @@
 import React from "react";
-import { Redirect, useParams } from "wouter";
+import { Redirect, useParams, Link } from "wouter";
 import { useGetMe, useGetGame, useListMyKeys, getGetGameQueryKey, getListMyKeysQueryKey } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Copy, AlertTriangle, KeyRound } from "lucide-react";
+import { Loader2, Copy, AlertTriangle, KeyRound, ChevronLeft, Terminal } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function ScriptDetailPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -23,8 +24,8 @@ export default function ScriptDetailPage() {
   if (isUserLoading) return <div className="min-h-screen bg-background flex items-center justify-center text-primary"><Loader2 className="animate-spin w-8 h-8" /></div>;
   if (userError || !user) return <Redirect to="/" />;
   
-  if (isGameLoading) return <AppLayout><div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div></AppLayout>;
-  if (gameError || !game) return <AppLayout><div className="p-12 text-center text-destructive">Failed to load script details.</div></AppLayout>;
+  if (isGameLoading) return <AppLayout><div className="flex justify-center p-20"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div></AppLayout>;
+  if (gameError || !game) return <AppLayout><div className="p-12 text-center text-destructive font-mono uppercase tracking-widest border border-destructive/20 bg-destructive/5 m-8">Failed to locate script module.</div></AppLayout>;
 
   const gameKeys = keys?.filter(k => k.gameId === game.id) || [];
   const activeKeys = gameKeys.filter(k => k.status === 'active');
@@ -43,52 +44,76 @@ export default function ScriptDetailPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-3xl font-bold font-mono tracking-tight">{game.name}</h1>
-              <Badge variant={game.status === 'active' ? 'success' : 'secondary'}>{game.status}</Badge>
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-8"
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <Link href="/scripts" className="text-muted-foreground hover:text-foreground transition-colors p-1 border border-transparent hover:border-border bg-transparent hover:bg-secondary">
+            <ChevronLeft className="w-4 h-4" />
+          </Link>
+          <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+            / Registry / {game.slug}
+          </div>
+        </div>
+
+        <div className="border-b border-border pb-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-3xl font-bold font-sans tracking-tight text-foreground">{game.name}</h1>
+                <Badge variant="outline" className={`rounded-none font-mono text-[10px] uppercase px-2 py-0 border ${game.status === 'active' ? 'border-primary text-primary bg-primary/10' : 'border-muted text-muted-foreground'}`}>
+                  {game.status}
+                </Badge>
+              </div>
+              <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">{game.description}</p>
             </div>
-            <p className="text-muted-foreground max-w-2xl">{game.description}</p>
+            
+            {hasAccess && (
+              <div className="bg-primary/10 border border-primary/30 px-4 py-2 flex flex-col items-end">
+                <span className="text-[10px] font-mono text-primary uppercase tracking-widest mb-1">Access Granted</span>
+                <span className="text-xs font-mono text-foreground">Auth level: OP</span>
+              </div>
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            <Card className="border-primary/20 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-blue-500" />
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Terminal className="w-5 h-5 text-primary" /> 
-                  Loader Script
+            <Card className="border-border bg-card shadow-none rounded-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-transparent" />
+              <CardHeader className="bg-secondary/30 border-b border-border pb-4">
+                <CardTitle className="flex items-center gap-2 text-sm font-mono uppercase tracking-wider text-foreground">
+                  <Terminal className="w-4 h-4 text-primary" /> 
+                  Execution Payload
                 </CardTitle>
-                <CardDescription>Paste this into your executor to inject the hub.</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-6">
                 {hasAccess ? (
-                  <div className="relative group rounded-md overflow-hidden bg-black/50 border border-border">
-                    <pre className="p-4 overflow-x-auto text-sm font-mono text-primary-foreground/90">
+                  <div className="relative group border border-border bg-background">
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-secondary/50">
+                      <span className="text-[10px] font-mono text-muted-foreground uppercase">loader.lua</span>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="h-6 text-[10px] font-mono uppercase tracking-wider rounded-none hover:bg-primary/20 hover:text-primary transition-colors"
+                        onClick={copyCode}
+                      >
+                        <Copy className="w-3 h-3 mr-1.5" /> Copy String
+                      </Button>
+                    </div>
+                    <pre className="p-4 overflow-x-auto text-sm font-mono text-foreground/90 leading-relaxed selection:bg-primary selection:text-primary-foreground">
                       <code>
-                        <span className="text-purple-400">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"https://raw.githubusercontent.com/iNFINITE-iKII/XiFil-Hub-Beta/main/artifacts/api-server/lua/games/{game.slug}/loader.lua"</span>))()
+                        <span className="text-primary">loadstring</span>(game:<span className="text-blue-400">HttpGet</span>(<span className="text-green-400">"https://raw.githubusercontent.com/iNFINITE-iKII/XiFil-Hub-Beta/main/artifacts/api-server/lua/games/{game.slug}/loader.lua"</span>))()
                       </code>
                     </pre>
-                    <Button 
-                      size="sm" 
-                      variant="secondary" 
-                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={copyCode}
-                    >
-                      <Copy className="w-4 h-4 mr-2" /> Copy
-                    </Button>
                   </div>
                 ) : (
-                  <div className="p-6 bg-destructive/10 border border-destructive/20 rounded-md flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="font-mono font-bold text-destructive mb-1">Access Denied</h4>
-                      <p className="text-sm text-destructive-foreground/80">You do not have an active license key for this script. Purchase a key to view the loader.</p>
-                    </div>
+                  <div className="p-6 bg-destructive/5 border border-destructive/20 flex flex-col items-center justify-center text-center min-h-[200px]">
+                    <AlertTriangle className="w-8 h-8 text-destructive mb-3 opacity-80" />
+                    <h4 className="font-mono font-bold text-destructive text-sm uppercase tracking-widest mb-2">Clearance Denied</h4>
+                    <p className="text-xs text-muted-foreground font-mono max-w-sm">Active entitlement required. Please procure a valid license key for this module.</p>
                   </div>
                 )}
               </CardContent>
@@ -96,66 +121,54 @@ export default function ScriptDetailPage() {
           </div>
 
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
+            <Card className="border-border shadow-none rounded-sm bg-card">
+              <CardHeader className="border-b border-border bg-secondary/30 pb-4">
+                <CardTitle className="flex items-center gap-2 text-sm font-mono uppercase tracking-wider">
                   <KeyRound className="w-4 h-4 text-primary" />
-                  Your Keys
+                  Your Licenses
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="p-0">
                 {isKeysLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" />
+                  <div className="p-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
                 ) : gameKeys.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">No keys found for this game.</p>
+                  <div className="p-8 text-center border-b border-border last:border-0">
+                    <p className="text-xs font-mono text-muted-foreground uppercase">No credentials found</p>
+                  </div>
                 ) : (
-                  gameKeys.map(key => (
-                    <div key={key.id} className="p-3 rounded border border-border bg-card/50 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Badge variant={key.status === 'active' ? 'success' : 'secondary'} className="text-[10px] px-1.5 py-0">
-                          {key.status}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground font-mono">
-                          {key.expiresAt ? new Date(key.expiresAt).toLocaleDateString() : 'Lifetime'}
-                        </span>
+                  <div className="divide-y divide-border">
+                    {gameKeys.map(key => (
+                      <div key={key.id} className="p-4 hover:bg-secondary/20 transition-colors">
+                        <div className="flex items-center justify-between mb-3">
+                          <Badge 
+                            variant="outline" 
+                            className={`rounded-none font-mono text-[9px] uppercase px-1.5 py-0 border ${
+                              key.status === 'active' ? 'border-primary text-primary bg-primary/10' : 'border-muted text-muted-foreground'
+                            }`}
+                          >
+                            {key.status}
+                          </Badge>
+                          <span className="text-[10px] text-muted-foreground font-mono uppercase">
+                            {key.expiresAt ? `EXP: ${new Date(key.expiresAt).toLocaleDateString()}` : 'LIFETIME'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 bg-background px-2 py-1.5 text-xs font-mono border border-border text-foreground truncate selection:bg-primary selection:text-primary-foreground">
+                            {key.key}
+                          </code>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-none border border-transparent hover:border-border hover:bg-secondary" onClick={() => copyKey(key.key)}>
+                            <Copy className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-background px-2 py-1 rounded text-xs font-mono border border-border truncate">
-                          {key.key}
-                        </code>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => copyKey(key.key)}>
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>
           </div>
         </div>
-      </div>
+      </motion.div>
     </AppLayout>
   );
-}
-
-// Needed icon for this file
-function Terminal(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" x2="20" y1="19" y2="19" />
-    </svg>
-  )
 }
