@@ -8,6 +8,8 @@ export const usersTable = pgTable("users", {
   username: text("username").notNull(),
   avatar: text("avatar"),
   isAdmin: boolean("is_admin").notNull().default(false),
+  robloxUsername: text("roblox_username"),
+  robloxId: text("roblox_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

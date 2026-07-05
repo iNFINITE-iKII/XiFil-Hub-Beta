@@ -6,6 +6,7 @@ import ScriptsPage from '@/pages/scripts';
 import ScriptDetailPage from '@/pages/script-detail';
 import KeysPage from '@/pages/keys';
 import AdminPage from '@/pages/admin';
+import ProfilePage from '@/pages/profile';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ function Router() {
       <Route path="/scripts/:slug" component={ScriptDetailPage} />
       <Route path="/keys" component={KeysPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/profile" component={ProfilePage} />
       <Route component={NotFound} />
     </Switch>
   );

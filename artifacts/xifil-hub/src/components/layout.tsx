@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetMe, useLogout } from "@workspace/api-client-react";
-import { Terminal, KeyRound, Gamepad2, ShieldAlert, LogOut, Loader2, ChevronRight, Activity, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Terminal, KeyRound, Gamepad2, ShieldAlert, LogOut, Loader2, ChevronRight, Activity, PanelLeftClose, PanelLeftOpen, UserCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -23,6 +23,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { href: "/dashboard", label: "Dashboard", icon: Activity },
     { href: "/scripts", label: "Script Directory", icon: Gamepad2 },
     { href: "/keys", label: "License Keys", icon: KeyRound },
+    { href: "/profile", label: "Profile", icon: UserCircle },
   ];
 
   if (user?.isAdmin) {

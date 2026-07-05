@@ -10,6 +10,8 @@ export const licenseKeysTable = pgTable("license_keys", {
   hwid: text("hwid"),
   status: text("status").notNull().default("active"),
   expiresAt: timestamp("expires_at"),
+  hwidResetCount: integer("hwid_reset_count").notNull().default(0),
+  hwidLastResetAt: timestamp("hwid_last_reset_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

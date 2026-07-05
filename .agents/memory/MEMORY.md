@@ -1,2 +1,3 @@
 - [XiFil Hub Discord OAuth](xifil-hub-discord-oauth.md) — OAuth state CSRF param required; callback validates session.oauthState before accepting code.
-- [XiFil Hub DB schema](xifil-hub-db-schema.md) — uses Replit built-in PostgreSQL (DATABASE_URL), not Neon directly; user can point to Neon in prod.
+- [XiFil Hub DB schema](xifil-hub-db-schema.md) — uses Neon PostgreSQL (NEON_DATABASE_URL); drizzle-kit push requires TTY so use raw SQL via node+pg for non-interactive migrations.
+- [XiFil Hub Fase 1 features](xifil-hub-fase1.md) — all Fase 1 features implemented; see topic file for route/page summary.
