@@ -6,6 +6,9 @@ import ConnectPgSimple from "connect-pg-simple";
 import { pool } from "@workspace/db";
 import router from "./routes/index.js";
 import { logger } from "./lib/logger.js";
+import path from "path";
+import { fileURLToPath } from "url";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PgSession = ConnectPgSimple(session);
 
@@ -66,5 +69,14 @@ app.use(
 );
 
 app.use("/api", router);
+
+// Serve frontend static files di production
+const frontendDist = path.resolve(__dirname, "../../xifil-hub/dist/public");
+app.use(express.static(frontendDist));
+
+// Catch-all: semua route non-API diarahkan ke index.html (React Router)
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(frontendDist, "index.html"));
+});
 
 export default app;
