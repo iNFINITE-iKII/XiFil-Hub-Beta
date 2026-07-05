@@ -24,9 +24,16 @@ router.get("/discord", (req, res): void => {
   const state = crypto.randomUUID();
   (req.session as any).oauthState = state;
 
-  const redirectUri = encodeURIComponent(getRedirectUri(req));
-  const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify&state=${state}`;
-  res.redirect(url);
+  // Explicitly save session BEFORE redirecting so state is persisted
+  req.session.save((err) => {
+    if (err) {
+      res.status(500).json({ error: "Session save failed" });
+      return;
+    }
+    const redirectUri = encodeURIComponent(getRedirectUri(req));
+    const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=identify&state=${state}`;
+    res.redirect(url);
+  });
 });
 
 // GET /api/auth/discord/callback - handle OAuth callback
@@ -106,10 +113,16 @@ router.get("/discord/callback", async (req, res) => {
       })
       .returning();
 
-    // Save to session
+    // Save to session explicitly before redirect
     (req.session as any).userId = user.id;
-
-    res.redirect("/dashboard");
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        req.log.error({ saveErr }, "Session save failed after OAuth");
+        res.redirect("/?error=session_failed");
+        return;
+      }
+      res.redirect("/dashboard");
+    });
   } catch (err) {
     req.log.error({ err }, "Discord OAuth error");
     res.redirect("/?error=oauth_error");

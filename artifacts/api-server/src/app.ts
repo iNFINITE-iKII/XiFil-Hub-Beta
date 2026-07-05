@@ -11,6 +11,9 @@ const PgSession = ConnectPgSimple(session);
 
 const app: Express = express();
 
+// Trust the Replit reverse proxy so cookies work correctly over HTTPS
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
@@ -48,7 +51,7 @@ app.use(
     store: new PgSession({
       pool,
       tableName: "user_sessions",
-      createTableIfMissing: true,
+      createTableIfMissing: false, // table already created via migration
     }),
     secret: sessionSecret,
     resave: false,
@@ -56,7 +59,7 @@ app.use(
     cookie: {
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
+      secure: true, // Replit always serves over HTTPS via proxy
       sameSite: "lax",
     },
   })
