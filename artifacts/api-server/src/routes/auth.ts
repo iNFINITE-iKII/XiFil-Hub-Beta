@@ -9,9 +9,17 @@ const DISCORD_CLIENT_ID = process.env["DISCORD_CLIENT_ID"];
 const DISCORD_CLIENT_SECRET = process.env["DISCORD_CLIENT_SECRET"];
 
 function getRedirectUri(req: any): string {
-  const domain = process.env["REPLIT_DEV_DOMAIN"] || req.hostname;
-  const protocol = process.env["REPLIT_DEV_DOMAIN"] ? "https" : req.protocol;
-  return `${protocol}://${domain}/api/auth/discord/callback`;
+  // Prioritas: env var eksplisit → Railway domain → Replit dev domain → fallback ke request hostname
+  if (process.env["APP_URL"]) {
+    return `${process.env["APP_URL"]}/api/auth/discord/callback`;
+  }
+  if (process.env["RAILWAY_PUBLIC_DOMAIN"]) {
+    return `https://${process.env["RAILWAY_PUBLIC_DOMAIN"]}/api/auth/discord/callback`;
+  }
+  if (process.env["REPLIT_DEV_DOMAIN"]) {
+    return `https://${process.env["REPLIT_DEV_DOMAIN"]}/api/auth/discord/callback`;
+  }
+  return `${req.protocol}://${req.hostname}/api/auth/discord/callback`;
 }
 
 // GET /api/auth/discord - redirect to Discord OAuth
