@@ -31,7 +31,7 @@ export default function ScriptDetailPage() {
   const activeKeys = gameKeys.filter(k => k.status === 'active');
   const hasAccess = activeKeys.length > 0;
 
-  const loaderUrl = `https://raw.githubusercontent.com/iNFINITE-iKII/XiFil-Hub-Beta/main/artifacts/api-server/lua/games/${game.slug}/loader.lua`;
+  const loaderUrl = `${window.location.origin}/api/loader/${game.slug}`;
 
   const copyCode = () => {
     const code = `loadstring(game:HttpGet("${loaderUrl}"))()`;
