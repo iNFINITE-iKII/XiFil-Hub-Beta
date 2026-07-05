@@ -31,6 +31,25 @@ export default function KeysPage() {
   const [isClaimOpen, setIsClaimOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
+  const whitelistRedeemMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(getApiUrl("/api/keys/whitelist-redeem"), {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Redeem gagal");
+      return data;
+    },
+    onSuccess: (data) => {
+      setClaimSuccess(`Key "${data.key}" untuk "${data.gameName}" berhasil di-redeem!`);
+      queryClient.invalidateQueries({ queryKey: getListMyKeysQueryKey() });
+    },
+    onError: (err: Error) => {
+      setClaimError(err.message);
+    },
+  });
+
   const claimMutation = useMutation({
     mutationFn: async (keyString: string) => {
       const res = await fetch(getApiUrl("/api/keys/claim"), {
@@ -135,6 +154,18 @@ export default function KeysPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            {(user as any).isWhitelisted && (
+              <Button
+                variant="outline"
+                onClick={() => { setClaimError(null); setClaimSuccess(null); whitelistRedeemMutation.mutate(); }}
+                disabled={whitelistRedeemMutation.isPending}
+                className="font-mono text-xs uppercase tracking-wider rounded-none h-9 shrink-0 border-primary text-primary hover:bg-primary hover:text-primary-foreground gap-1.5"
+                title="Kamu ada di whitelist — redeem key otomatis"
+              >
+                {whitelistRedeemMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                Redeem
+              </Button>
+            )}
             <Button
               onClick={() => { setIsClaimOpen(true); setClaimError(null); setClaimSuccess(null); }}
               className="font-mono text-xs uppercase tracking-wider rounded-none h-9 shrink-0"

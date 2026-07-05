@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, ShieldAlert, Users, KeyRound, Activity, Terminal, Download, Layers, RotateCcw, Settings, CheckCircle2, Eye, UserX, Copy } from "lucide-react";
+import { Loader2, ShieldAlert, Users, KeyRound, Activity, Terminal, Download, Layers, RotateCcw, Settings, CheckCircle2, Eye, UserX, Copy, Search } from "lucide-react";
 import { motion } from "framer-motion";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -43,12 +43,20 @@ export default function AdminPage() {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [copiedHwid, setCopiedHwid] = useState<string | null>(null);
+  const [userSearch, setUserSearch] = useState("");
+  const [keySearch, setKeySearch] = useState("");
+  const [wlInput, setWlInput] = useState({ discordId: "", notes: "" });
+  const [setRobloxInput, setSetRobloxInput] = useState("");
+  const [setRobloxError, setSetRobloxError] = useState<string | null>(null);
   const [settingsForm, setSettingsForm] = useState({
     defaultDurationDays: "",
     defaultGameId: "",
     hwidResetLimit: "1",
     hwidResetCooldownHours: "168",
     keyPrefix: "XIFIL",
+    maxAutoClaimKeys: "1",
+    maxHwidPerKey: "1",
+    maxRobloxPerKey: "1",
   });
 
   const { data: stats, isLoading: isStatsLoading } = useGetAdminStats({ query: { enabled: !!user?.isAdmin, queryKey: getGetAdminStatsQueryKey() } });
@@ -73,6 +81,9 @@ export default function AdminPage() {
         hwidResetLimit: String(settings.hwidResetLimit ?? 1),
         hwidResetCooldownHours: String(settings.hwidResetCooldownHours ?? 168),
         keyPrefix: settings.keyPrefix ?? "XIFIL",
+        maxAutoClaimKeys: String(settings.maxAutoClaimKeys ?? 1),
+        maxHwidPerKey: String(settings.maxHwidPerKey ?? 1),
+        maxRobloxPerKey: String(settings.maxRobloxPerKey ?? 1),
       });
     }
   }, [settings]);
@@ -155,6 +166,9 @@ export default function AdminPage() {
           hwidResetLimit: parseInt(data.hwidResetLimit),
           hwidResetCooldownHours: parseInt(data.hwidResetCooldownHours),
           keyPrefix: data.keyPrefix,
+          maxAutoClaimKeys: Number.isNaN(parseInt(data.maxAutoClaimKeys)) ? 1 : parseInt(data.maxAutoClaimKeys),
+          maxHwidPerKey: Number.isNaN(parseInt(data.maxHwidPerKey)) ? 1 : parseInt(data.maxHwidPerKey),
+          maxRobloxPerKey: Number.isNaN(parseInt(data.maxRobloxPerKey)) ? 1 : parseInt(data.maxRobloxPerKey),
         }),
         credentials: "include",
       });
@@ -167,6 +181,76 @@ export default function AdminPage() {
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 3000);
     },
+  });
+
+  // ── Whitelist data + mutations ──────────────────────────────
+  const { data: whitelist, isLoading: isWlLoading } = useQuery({
+    queryKey: ["admin-whitelist"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/admin/whitelist"), { credentials: "include" });
+      return res.json();
+    },
+    enabled: !!user?.isAdmin && activeTab === "whitelist",
+  });
+
+  const addWlMutation = useMutation({
+    mutationFn: async (data: { discordId: string; notes: string }) => {
+      const res = await fetch(apiUrl("/api/admin/whitelist"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-whitelist"] });
+      setWlInput({ discordId: "", notes: "" });
+    },
+  });
+
+  const removeWlMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(apiUrl(`/api/admin/whitelist/${id}`), { method: "DELETE", credentials: "include" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-whitelist"] }),
+  });
+
+  const setRobloxMutation = useMutation({
+    mutationFn: async ({ userId, robloxUsername }: { userId: number; robloxUsername: string }) => {
+      const res = await fetch(apiUrl(`/api/admin/users/${userId}/set-roblox`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ robloxUsername }),
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+      queryClient.invalidateQueries({ queryKey: ["admin-user-detail", selectedUserId] });
+      setSetRobloxInput("");
+      setSetRobloxError(null);
+    },
+    onError: (err: Error) => setSetRobloxError(err.message),
+  });
+
+  // Filtered data untuk search
+  const filteredUsers = (users as any[] | undefined)?.filter((u) => {
+    const q = userSearch.toLowerCase();
+    return !q || u.username?.toLowerCase().includes(q) || u.discordId?.includes(q) || u.robloxUsername?.toLowerCase().includes(q);
+  });
+
+  const filteredKeys = (keys as any[] | undefined)?.filter((k) => {
+    const q = keySearch.toLowerCase();
+    return !q || k.key?.toLowerCase().includes(q) || k.username?.toLowerCase().includes(q) || k.gameName?.toLowerCase().includes(q);
   });
 
   if (isUserLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>;
@@ -255,6 +339,7 @@ export default function AdminPage() {
             <TabsTrigger value="overview" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Telemetry</TabsTrigger>
             <TabsTrigger value="users" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Operators</TabsTrigger>
             <TabsTrigger value="keys" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Licenses</TabsTrigger>
+            <TabsTrigger value="whitelist" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">Whitelist</TabsTrigger>
             <TabsTrigger value="settings" className="rounded-none font-mono text-xs uppercase data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none">
               <Settings className="w-3.5 h-3.5 mr-1.5" /> Settings
             </TabsTrigger>
@@ -309,6 +394,17 @@ export default function AdminPage() {
 
           {/* OPERATORS */}
           <TabsContent value="users" className="mt-0">
+            <div className="mb-3 flex gap-2">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Cari username / Discord ID / Roblox..."
+                  className="pl-9 font-mono text-xs rounded-none border-border bg-background focus-visible:ring-0 focus-visible:border-primary h-9"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                />
+              </div>
+            </div>
             <Card className="border-border bg-card shadow-none rounded-sm">
               <CardContent className="p-0">
                 {isUsersLoading ? (
@@ -327,7 +423,7 @@ export default function AdminPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {users?.map((u: any) => (
+                        {(filteredUsers ?? []).map((u: any) => (
                           <TableRow key={u.id} className="border-border hover:bg-secondary/20 transition-colors">
                             <TableCell className="font-mono text-xs text-muted-foreground px-6">{String(u.id).padStart(4, "0")}</TableCell>
                             <TableCell>
@@ -394,6 +490,17 @@ export default function AdminPage() {
 
           {/* LICENSES */}
           <TabsContent value="keys" className="mt-0">
+            <div className="mb-3 flex gap-2">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Cari key / owner / module..."
+                  className="pl-9 font-mono text-xs rounded-none border-border bg-background focus-visible:ring-0 focus-visible:border-primary h-9"
+                  value={keySearch}
+                  onChange={(e) => setKeySearch(e.target.value)}
+                />
+              </div>
+            </div>
             <Card className="border-border bg-card shadow-none rounded-sm">
               <CardContent className="p-0">
                 {isKeysLoading ? (
@@ -413,7 +520,7 @@ export default function AdminPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {keys?.map((k: any) => (
+                        {(filteredKeys ?? []).map((k: any) => (
                           <TableRow key={k.id} className="border-border hover:bg-secondary/20 transition-colors">
                             <TableCell className="px-6">
                               <div className="flex items-center gap-1.5">
@@ -574,6 +681,64 @@ export default function AdminPage() {
                 </CardContent>
               </Card>
 
+              {/* Whitelist Policy */}
+              <Card className="border-border bg-card shadow-none rounded-sm">
+                <CardHeader className="border-b border-border bg-secondary/30 py-4">
+                  <CardTitle className="text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                    <Users className="w-4 h-4 text-primary" /> Whitelist Policy
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-5">
+                  <div className="space-y-2">
+                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max Auto-Claim Keys per User</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                      placeholder="1"
+                      value={settingsForm.maxAutoClaimKeys}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, maxAutoClaimKeys: e.target.value })}
+                    />
+                    <p className="text-[10px] text-muted-foreground font-mono">Jumlah key yang bisa di-redeem otomatis oleh user yang di-whitelist.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Per-Key Limits */}
+              <Card className="border-border bg-card shadow-none rounded-sm">
+                <CardHeader className="border-b border-border bg-secondary/30 py-4">
+                  <CardTitle className="text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-primary" /> Per-Key Limits
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-5">
+                  <div className="space-y-2">
+                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max HWID per Key</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                      placeholder="1"
+                      value={settingsForm.maxHwidPerKey}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, maxHwidPerKey: e.target.value })}
+                    />
+                    <p className="text-[10px] text-muted-foreground font-mono">Jumlah HWID yang bisa terkait ke satu key.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max Akun Roblox per Key</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                      placeholder="1"
+                      value={settingsForm.maxRobloxPerKey}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, maxRobloxPerKey: e.target.value })}
+                    />
+                    <p className="text-[10px] text-muted-foreground font-mono">Jumlah akun Roblox yang bisa terkait ke satu key.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
               <div className="lg:col-span-2 flex justify-end">
                 <Button
                   onClick={() => saveSettingsMutation.mutate(settingsForm)}
@@ -583,6 +748,101 @@ export default function AdminPage() {
                   {saveSettingsMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : settingsSaved ? <CheckCircle2 className="w-3 h-3" /> : null}
                   {settingsSaved ? "Saved!" : "Save Settings"}
                 </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* WHITELIST */}
+          <TabsContent value="whitelist" className="mt-0">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Add form */}
+              <Card className="border-border bg-card shadow-none rounded-sm">
+                <CardHeader className="border-b border-border bg-secondary/30 py-4">
+                  <CardTitle className="text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                    <Users className="w-4 h-4 text-primary" /> Tambah ke Whitelist
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-4">
+                  <div className="space-y-2">
+                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Discord ID</Label>
+                    <Input
+                      className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                      placeholder="123456789012345678"
+                      value={wlInput.discordId}
+                      onChange={(e) => setWlInput({ ...wlInput, discordId: e.target.value.trim() })}
+                    />
+                    <p className="text-[10px] text-muted-foreground font-mono">Hanya Discord ID numerik (17–19 digit).</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Notes (opsional)</Label>
+                    <Input
+                      className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                      placeholder="Nama / keterangan..."
+                      value={wlInput.notes}
+                      onChange={(e) => setWlInput({ ...wlInput, notes: e.target.value })}
+                    />
+                  </div>
+                  {addWlMutation.isError && (
+                    <p className="text-[10px] font-mono text-destructive bg-destructive/10 border border-destructive/20 px-2 py-1">
+                      {(addWlMutation.error as Error).message}
+                    </p>
+                  )}
+                  <Button
+                    className="rounded-none font-mono text-xs uppercase h-9 w-full gap-2"
+                    disabled={addWlMutation.isPending || !wlInput.discordId}
+                    onClick={() => addWlMutation.mutate(wlInput)}
+                  >
+                    {addWlMutation.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+                    Tambah
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* List */}
+              <div className="lg:col-span-2">
+                <Card className="border-border bg-card shadow-none rounded-sm">
+                  <CardContent className="p-0">
+                    {isWlLoading ? (
+                      <div className="flex justify-center py-20"><Loader2 className="animate-spin text-primary w-6 h-6" /></div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-border bg-secondary/30">
+                            <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 px-6">Discord ID</TableHead>
+                            <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Notes</TableHead>
+                            <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Ditambah</TableHead>
+                            <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 text-right px-6">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {(whitelist as any[] | undefined)?.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={4} className="text-center py-8 font-mono text-xs text-muted-foreground">Whitelist kosong.</TableCell>
+                            </TableRow>
+                          )}
+                          {(whitelist as any[] | undefined)?.map((w: any) => (
+                            <TableRow key={w.id} className="border-border hover:bg-secondary/20">
+                              <TableCell className="font-mono text-xs px-6">{w.discordId}</TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">{w.notes ?? "—"}</TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">{new Date(w.createdAt).toLocaleDateString()}</TableCell>
+                              <TableCell className="text-right px-6">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] font-mono uppercase border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground rounded-none"
+                                  onClick={() => { if (confirm(`Hapus ${w.discordId} dari whitelist?`)) removeWlMutation.mutate(w.id); }}
+                                  disabled={removeWlMutation.isPending}
+                                >
+                                  Hapus
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             </div>
           </TabsContent>
@@ -736,6 +996,29 @@ export default function AdminPage() {
                   ) : (
                     <p className="font-mono text-xs text-muted-foreground/50 uppercase">Belum terhubung</p>
                   )}
+                  {/* Admin set Roblox */}
+                  <div className="pt-2 border-t border-border/50 space-y-1.5">
+                    <p className="font-mono text-[9px] uppercase text-muted-foreground tracking-wider">Set / Ganti Roblox (Admin)</p>
+                    <div className="flex gap-2">
+                      <Input
+                        className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-8 flex-1"
+                        placeholder="Roblox username..."
+                        value={setRobloxInput}
+                        onChange={(e) => { setSetRobloxInput(e.target.value); setSetRobloxError(null); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" && setRobloxInput.trim()) setRobloxMutation.mutate({ userId: userDetail.id, robloxUsername: setRobloxInput.trim() }); }}
+                      />
+                      <Button
+                        size="sm"
+                        className="rounded-none font-mono text-xs uppercase h-8 shrink-0"
+                        disabled={setRobloxMutation.isPending || !setRobloxInput.trim()}
+                        onClick={() => setRobloxMutation.mutate({ userId: userDetail.id, robloxUsername: setRobloxInput.trim() })}
+                      >
+                        {setRobloxMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Set"}
+                      </Button>
+                    </div>
+                    {setRobloxError && <p className="text-[10px] font-mono text-destructive">{setRobloxError}</p>}
+                    {setRobloxMutation.isSuccess && <p className="text-[10px] font-mono text-primary">✓ Berhasil diperbarui</p>}
+                  </div>
                 </div>
 
                 {/* Keys */}

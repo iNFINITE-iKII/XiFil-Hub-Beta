@@ -7,6 +7,11 @@ export const adminSettingsTable = pgTable("admin_settings", {
   hwidResetLimit: integer("hwid_reset_limit").notNull().default(1),
   hwidResetCooldownHours: integer("hwid_reset_cooldown_hours").notNull().default(168),
   keyPrefix: text("key_prefix").notNull().default("XIFIL"),
+  // Whitelist auto-claim
+  maxAutoClaimKeys: integer("max_auto_claim_keys").notNull().default(1),
+  // Per-key limits
+  maxHwidPerKey: integer("max_hwid_per_key").notNull().default(1),
+  maxRobloxPerKey: integer("max_roblox_per_key").notNull().default(1),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

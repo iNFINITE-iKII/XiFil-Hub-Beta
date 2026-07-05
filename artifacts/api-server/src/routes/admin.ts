@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable, gamesTable, licenseKeysTable, adminSettingsTable } from "@workspace/db";
+import { usersTable, gamesTable, licenseKeysTable, adminSettingsTable, whitelistTable } from "@workspace/db";
 import { eq, count, gte } from "drizzle-orm";
 
 const router = Router();
@@ -156,6 +156,89 @@ router.post("/users/:id/reset-roblox", requireAdmin, async (req, res): Promise<v
   res.json({ message: "Roblox account unlinked" });
 });
 
+// POST /api/admin/users/:id/set-roblox — admin mengubah link Roblox user
+router.post("/users/:id/set-roblox", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid user ID" }); return; }
+
+  const { robloxUsername } = req.body as { robloxUsername: string };
+  if (!robloxUsername || typeof robloxUsername !== "string") {
+    res.status(400).json({ error: "robloxUsername is required" });
+    return;
+  }
+
+  const trimmed = robloxUsername.trim();
+  if (trimmed.length < 3 || trimmed.length > 20) {
+    res.status(400).json({ error: "Roblox username harus 3–20 karakter" });
+    return;
+  }
+
+  // Verifikasi via Roblox API
+  try {
+    const rblxRes = await fetch("https://users.roblox.com/v1/usernames/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [trimmed], excludeBannedUsers: true }),
+    });
+    if (rblxRes.ok) {
+      const data = await rblxRes.json() as { data: Array<{ id: number; name: string }> };
+      const found = data.data?.[0];
+      if (!found) { res.status(404).json({ error: "Username Roblox tidak ditemukan" }); return; }
+      const [user] = await db.update(usersTable).set({ robloxUsername: found.name, robloxId: String(found.id) }).where(eq(usersTable.id, id)).returning();
+      if (!user) { res.status(404).json({ error: "User not found" }); return; }
+      res.json({ robloxUsername: found.name, robloxId: String(found.id) });
+      return;
+    }
+  } catch (_) {}
+
+  const [user] = await db.update(usersTable).set({ robloxUsername: trimmed, robloxId: null }).where(eq(usersTable.id, id)).returning();
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  res.json({ robloxUsername: trimmed, robloxId: null });
+});
+
+// ── Whitelist ────────────────────────────────────────────────────────────────
+
+// GET /api/admin/whitelist
+router.get("/whitelist", requireAdmin, async (_req, res) => {
+  const rows = await db.select().from(whitelistTable).orderBy(whitelistTable.createdAt);
+  res.json(rows);
+});
+
+// POST /api/admin/whitelist
+router.post("/whitelist", requireAdmin, async (req, res): Promise<void> => {
+  const { discordId, notes } = req.body as { discordId: string; notes?: string };
+  if (!discordId || typeof discordId !== "string") {
+    res.status(400).json({ error: "discordId is required" });
+    return;
+  }
+
+  const trimmed = discordId.trim();
+  if (!/^\d{17,19}$/.test(trimmed)) {
+    res.status(400).json({ error: "discordId harus berupa ID numerik Discord (17–19 digit)" });
+    return;
+  }
+
+  try {
+    const [row] = await db.insert(whitelistTable).values({ discordId: trimmed, notes: notes?.trim() || null }).returning();
+    res.status(201).json(row);
+  } catch (e: any) {
+    if (e.code === "23505") {
+      res.status(409).json({ error: "Discord ID sudah ada di whitelist" });
+    } else {
+      throw e;
+    }
+  }
+});
+
+// DELETE /api/admin/whitelist/:id
+router.delete("/whitelist/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+  const [deleted] = await db.delete(whitelistTable).where(eq(whitelistTable.id, id)).returning();
+  if (!deleted) { res.status(404).json({ error: "Not found" }); return; }
+  res.json({ message: "Removed from whitelist" });
+});
+
 // GET /api/admin/settings
 router.get("/settings", requireAdmin, async (req, res) => {
   const settings = await getOrCreateSettings();
@@ -164,12 +247,15 @@ router.get("/settings", requireAdmin, async (req, res) => {
 
 // PUT /api/admin/settings
 router.put("/settings", requireAdmin, async (req, res): Promise<void> => {
-  const { defaultDurationDays, defaultGameId, hwidResetLimit, hwidResetCooldownHours, keyPrefix } = req.body as {
+  const { defaultDurationDays, defaultGameId, hwidResetLimit, hwidResetCooldownHours, keyPrefix, maxAutoClaimKeys, maxHwidPerKey, maxRobloxPerKey } = req.body as {
     defaultDurationDays?: number | null;
     defaultGameId?: number | null;
     hwidResetLimit?: number;
     hwidResetCooldownHours?: number;
     keyPrefix?: string;
+    maxAutoClaimKeys?: number;
+    maxHwidPerKey?: number;
+    maxRobloxPerKey?: number;
   };
 
   if (hwidResetLimit !== undefined && (hwidResetLimit < 0 || hwidResetLimit > 100)) {
@@ -192,6 +278,9 @@ router.put("/settings", requireAdmin, async (req, res): Promise<void> => {
       hwidResetLimit: hwidResetLimit !== undefined ? hwidResetLimit : existing.hwidResetLimit,
       hwidResetCooldownHours: hwidResetCooldownHours !== undefined ? hwidResetCooldownHours : existing.hwidResetCooldownHours,
       keyPrefix: keyPrefix !== undefined ? keyPrefix.toUpperCase() : existing.keyPrefix,
+      maxAutoClaimKeys: maxAutoClaimKeys !== undefined ? Math.max(0, maxAutoClaimKeys) : existing.maxAutoClaimKeys,
+      maxHwidPerKey: maxHwidPerKey !== undefined ? Math.max(1, maxHwidPerKey) : existing.maxHwidPerKey,
+      maxRobloxPerKey: maxRobloxPerKey !== undefined ? Math.max(1, maxRobloxPerKey) : existing.maxRobloxPerKey,
       updatedAt: new Date(),
     })
     .where(eq(adminSettingsTable.id, existing.id))

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { licenseKeysTable, gamesTable, usersTable, adminSettingsTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { licenseKeysTable, gamesTable, usersTable, adminSettingsTable, whitelistTable } from "@workspace/db";
+import { eq, and, inArray, count } from "drizzle-orm";
 import crypto from "crypto";
 
 const router = Router();
@@ -170,6 +170,66 @@ router.post("/my-hwid-reset", requireAuth, async (req, res): Promise<void> => {
 
   const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
   res.json(formatKey(updated, game?.name, null));
+});
+
+// POST /api/keys/whitelist-redeem — user yang di-whitelist auto-klaim key baru
+router.post("/whitelist-redeem", requireAuth, async (req, res): Promise<void> => {
+  const userId = (req.session as any).userId as number;
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  // Cek whitelist by discordId
+  const [whitelisted] = await db.select().from(whitelistTable).where(eq(whitelistTable.discordId, user.discordId));
+  if (!whitelisted) {
+    res.status(403).json({ error: "Kamu tidak ada di whitelist" });
+    return;
+  }
+
+  const settings = await getSettings();
+
+  // Harus ada default game sebelum masuk transaction
+  if (!settings.defaultGameId) {
+    res.status(503).json({ error: "Admin belum mengatur default module. Hubungi admin." });
+    return;
+  }
+
+  const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, settings.defaultGameId));
+  if (!game) {
+    res.status(503).json({ error: "Default module tidak ditemukan. Hubungi admin." });
+    return;
+  }
+
+  let expiresAt: Date | null = null;
+  if (settings.defaultDurationDays) {
+    expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + settings.defaultDurationDays);
+  }
+
+  // Cek kuota + insert secara atomik dalam satu transaksi untuk mencegah race condition
+  let newKey: any;
+  try {
+    newKey = await db.transaction(async (tx) => {
+      const [{ total }] = await tx
+        .select({ total: count() })
+        .from(licenseKeysTable)
+        .where(eq(licenseKeysTable.userId, userId))
+        .for("update"); // row-level lock pada aggregate
+      if (Number(total) >= settings.maxAutoClaimKeys) {
+        throw Object.assign(new Error(`Batas auto-klaim tercapai (maks ${settings.maxAutoClaimKeys} key)`), { status: 400 });
+      }
+      const [key] = await tx
+        .insert(licenseKeysTable)
+        .values({ key: generateKeyString(settings.keyPrefix), gameId: settings.defaultGameId!, userId, expiresAt, status: "active" })
+        .returning();
+      return key;
+    });
+  } catch (err: any) {
+    if (err.status === 400) { res.status(400).json({ error: err.message }); return; }
+    throw err;
+  }
+
+  res.status(201).json(formatKey(newKey, game.name, user.username));
 });
 
 // POST /api/keys/generate — generate single key (admin)

@@ -1,55 +1,20 @@
-import React, { useState } from "react";
+import React from "react";
 import { Redirect } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, User, CheckCircle2, AlertCircle, ExternalLink } from "lucide-react";
+import { Loader2, User, ExternalLink, LinkIcon, ShieldOff } from "lucide-react";
 import { motion } from "framer-motion";
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
-function apiUrl(path: string) { return `${BASE}${path}`; }
-
 export default function ProfilePage() {
-  const queryClient = useQueryClient();
   const { data: user, isLoading } = useGetMe();
-  const [robloxInput, setRobloxInput] = useState("");
-  const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const linkRobloxMutation = useMutation({
-    mutationFn: async (robloxUsername: string) => {
-      const res = await fetch(apiUrl("/api/auth/roblox"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ robloxUsername }),
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to link account");
-      return data;
-    },
-    onSuccess: (data) => {
-      setSuccess(`Roblox account "${data.robloxUsername}" linked successfully!`);
-      setRobloxInput("");
-      setError(null);
-      queryClient.invalidateQueries({ queryKey: ["get-me"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
-    },
-    onError: (err: Error) => {
-      setError(err.message);
-      setSuccess(null);
-    },
-  });
 
   if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center text-primary"><Loader2 className="animate-spin w-8 h-8" /></div>;
   if (!user) return <Redirect to="/" />;
 
   const robloxLinked = (user as any).robloxUsername;
+  const robloxId = (user as any).robloxId;
 
   return (
     <AppLayout>
@@ -84,7 +49,7 @@ export default function ProfilePage() {
               />
               <div>
                 <p className="text-lg font-bold font-mono text-foreground">{user.username}</p>
-                <p className="text-xs font-mono text-muted-foreground">ID: {user.discordId}</p>
+                <p className="text-xs font-mono text-muted-foreground">Discord ID: {user.discordId}</p>
                 <div className="mt-1.5">
                   {user.isAdmin
                     ? <Badge variant="outline" className="rounded-none border-primary text-primary bg-primary/10 font-mono text-[9px] uppercase px-1.5 py-0">SYS_ADMIN</Badge>
@@ -96,83 +61,60 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
-        {/* Roblox Account Linking */}
+        {/* Roblox Account */}
         <Card className="border-border bg-card shadow-none rounded-sm">
           <CardHeader className="border-b border-border bg-secondary/30 py-4">
             <CardTitle className="text-sm font-mono uppercase tracking-wider flex items-center gap-2">
-              <ExternalLink className="w-4 h-4 text-primary" /> Roblox Account Link
+              <LinkIcon className="w-4 h-4 text-primary" /> Roblox Account
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-6 space-y-5">
+          <CardContent className="p-6 space-y-4">
             {robloxLinked ? (
-              <div className="space-y-4">
-                <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 px-4 py-3">
-                  <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
-                  <div>
-                    <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-0.5">Linked Account</p>
-                    <p className="font-bold font-mono text-foreground text-lg">{(user as any).robloxUsername}</p>
-                    {(user as any).robloxId && (
+              <>
+                <div className="flex items-start gap-4">
+                  {/* Avatar dari Roblox */}
+                  {robloxId && (
+                    <img
+                      src={`https://www.roblox.com/headshot-thumbnail/image?userId=${robloxId}&width=100&height=100&format=png`}
+                      alt={robloxLinked}
+                      className="w-16 h-16 border border-border rounded-sm bg-secondary/30"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  )}
+                  <div className="flex-1">
+                    <p className="font-bold font-mono text-foreground text-lg">{robloxLinked}</p>
+                    {robloxId && (
+                      <p className="text-xs font-mono text-muted-foreground">Roblox ID: {robloxId}</p>
+                    )}
+                    {robloxId && (
                       <a
-                        href={`https://www.roblox.com/users/${(user as any).robloxId}/profile`}
+                        href={`https://www.roblox.com/users/${robloxId}/profile`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[10px] font-mono text-primary hover:underline"
+                        className="inline-flex items-center gap-1 text-[10px] font-mono text-primary hover:underline mt-1"
                       >
-                        View Roblox Profile →
+                        <ExternalLink className="w-3 h-3" /> Lihat Profil Roblox
                       </a>
                     )}
                   </div>
                 </div>
-                <p className="text-xs font-mono text-muted-foreground">To change your linked account, enter a new username below.</p>
-              </div>
+                <div className="border-t border-border pt-3">
+                  <p className="text-[10px] font-mono text-muted-foreground leading-relaxed">
+                    Akun Roblox terhubung otomatis saat DRM berhasil divalidasi di game. Untuk mengubah, hubungi admin.
+                  </p>
+                </div>
+              </>
             ) : (
-              <div className="bg-secondary/30 border border-border px-4 py-3">
-                <p className="text-xs font-mono text-muted-foreground">
-                  <span className="text-foreground font-bold">No Roblox account linked.</span> Link your Roblox username so admins can identify your HWID and manage your licenses.
-                </p>
+              <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
+                <ShieldOff className="w-10 h-10 text-muted-foreground/40" />
+                <div>
+                  <p className="font-mono text-sm text-muted-foreground font-bold uppercase tracking-wider">Belum Terhubung</p>
+                  <p className="text-[11px] font-mono text-muted-foreground/70 mt-2 max-w-xs leading-relaxed">
+                    Akun Roblox akan terhubung otomatis saat kamu memainkan game dengan key aktif dan DRM berhasil divalidasi.
+                  </p>
+                </div>
               </div>
             )}
-
-            <div className="space-y-2">
-              <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">
-                {robloxLinked ? "Change Roblox Username" : "Roblox Username"}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  className="rounded-none border-border bg-secondary/50 font-mono text-sm focus-visible:ring-0 focus-visible:border-primary h-10 flex-1"
-                  placeholder="Enter your Roblox username..."
-                  value={robloxInput}
-                  onChange={(e) => { setRobloxInput(e.target.value); setError(null); setSuccess(null); }}
-                  onKeyDown={(e) => { if (e.key === "Enter" && robloxInput.trim()) linkRobloxMutation.mutate(robloxInput.trim()); }}
-                />
-                <Button
-                  onClick={() => linkRobloxMutation.mutate(robloxInput.trim())}
-                  disabled={linkRobloxMutation.isPending || !robloxInput.trim()}
-                  className="rounded-none font-mono text-xs uppercase h-10 shrink-0"
-                >
-                  {linkRobloxMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : robloxLinked ? "Update" : "Link"}
-                </Button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="flex items-center gap-2 text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <p className="text-xs font-mono">{error}</p>
-              </div>
-            )}
-            {success && (
-              <div className="flex items-center gap-2 text-primary bg-primary/10 border border-primary/20 px-3 py-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <p className="text-xs font-mono">{success}</p>
-              </div>
-            )}
-
-            <div className="border-t border-border pt-4">
-              <p className="text-[10px] font-mono text-muted-foreground leading-relaxed">
-                Your Roblox username is verified against the Roblox API. This links your HWID to your Roblox identity, enabling admins to manage keys per Roblox account.
-              </p>
-            </div>
           </CardContent>
         </Card>
       </motion.div>

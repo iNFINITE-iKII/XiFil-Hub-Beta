@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable } from "@workspace/db";
+import { usersTable, whitelistTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 const router = Router();
@@ -88,6 +88,9 @@ router.get("/me", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
   if (!user) { (req.session as any).userId = undefined; res.status(401).json({ error: "User not found" }); return; }
 
+  // Cek apakah user ada di whitelist
+  const [whitelisted] = await db.select().from(whitelistTable).where(eq(whitelistTable.discordId, user.discordId));
+
   res.json({
     id: user.id,
     discordId: user.discordId,
@@ -97,15 +100,26 @@ router.get("/me", async (req, res): Promise<void> => {
     robloxUsername: user.robloxUsername,
     robloxId: user.robloxId,
     createdAt: user.createdAt.toISOString(),
+    isWhitelisted: !!whitelisted,
   });
 });
 
-// POST /api/auth/roblox — link Roblox account
+// POST /api/auth/roblox — set Roblox account (ADMIN ONLY)
+// User biasa tidak bisa mengubah Roblox sendiri; hanya via DRM auto-link pertama kali
 router.post("/roblox", async (req, res): Promise<void> => {
   const userId = (req.session as any)?.userId;
   if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
 
-  const { robloxUsername } = req.body as { robloxUsername: string };
+  // Hanya admin yang boleh set manual
+  const [caller] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!caller?.isAdmin) {
+    res.status(403).json({ error: "Hanya admin yang dapat mengubah akun Roblox. Akun Roblox terhubung otomatis saat DRM valid pertama kali." });
+    return;
+  }
+
+  const { robloxUsername, targetUserId } = req.body as { robloxUsername: string; targetUserId?: number };
+  const applyToId = targetUserId ?? userId;
+
   if (!robloxUsername || typeof robloxUsername !== "string") {
     res.status(400).json({ error: "robloxUsername is required" });
     return;
@@ -117,7 +131,7 @@ router.post("/roblox", async (req, res): Promise<void> => {
     return;
   }
 
-  // Verify the username exists on Roblox
+  // Verify via Roblox API
   try {
     const robloxRes = await fetch(`https://users.roblox.com/v1/usernames/users`, {
       method: "POST",
@@ -129,14 +143,15 @@ router.post("/roblox", async (req, res): Promise<void> => {
       const found = data.data?.[0];
       if (!found) { res.status(404).json({ error: "Roblox username not found" }); return; }
 
-      await db.update(usersTable).set({ robloxUsername: found.name, robloxId: String(found.id) }).where(eq(usersTable.id, userId));
+      await db.update(usersTable).set({ robloxUsername: found.name, robloxId: String(found.id) }).where(eq(usersTable.id, applyToId));
       res.json({ robloxUsername: found.name, robloxId: String(found.id) });
       return;
     }
   } catch (_) {}
 
-  // Fallback: save without verification
-  await db.update(usersTable).set({ robloxUsername: trimmed }).where(eq(usersTable.id, userId));
+  // Fallback: explicitly clear robloxId to avoid stale pairings
+  const [fallbackUser] = await db.update(usersTable).set({ robloxUsername: trimmed, robloxId: null }).where(eq(usersTable.id, applyToId)).returning();
+  if (!fallbackUser) { res.status(404).json({ error: "User not found" }); return; }
   res.json({ robloxUsername: trimmed, robloxId: null });
 });
 
