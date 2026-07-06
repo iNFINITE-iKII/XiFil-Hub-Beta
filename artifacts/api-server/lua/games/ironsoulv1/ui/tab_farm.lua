@@ -104,7 +104,7 @@ _G.AutoReturnLobbyToggle = CreateToggleUI(MainFarmPage, "🏠 Auto Return to Lob
     end
 end, "lblAutoReturn")
 
-local _AUTOEXEC_CODE = 'loadstring(game:HttpGet("https://xifil-hub-production.up.railway.app/api/lua/loader?game=soul_iron"))()'
+local _AUTOEXEC_CODE = 'loadstring(game:HttpGet("https://xifil-hub-beta-production.up.railway.app/api/lua/loader?game=soul_iron"))()'
 local _queue_teleport = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)
 _G.AutoExecuteToggle = CreateToggleUI(MainFarmPage, "⚡ Auto Exec on Server Hop/Rejoin", EngineConfig.AutoExecuteOnRejoin, function(state)
     EngineConfig.AutoExecuteOnRejoin = state
