@@ -480,7 +480,7 @@ export default function AdminPage() {
                             <TableCell className="font-mono text-xs text-muted-foreground px-6">{String(u.id).padStart(4, "0")}</TableCell>
                             <TableCell>
                               <div className="flex items-center gap-3">
-                                <img src={u.avatar ? `https://cdn.discordapp.com/avatars/${u.discordId}/${u.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`} alt="" className="w-6 h-6 border border-border grayscale hover:grayscale-0 transition-all" />
+                                <img src={u.avatar ? `https://cdn.discordapp.com/avatars/${u.discordId}/${u.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`} alt="" className="w-6 h-6 border border-border transition-all" />
                                 <span className="font-bold text-sm text-foreground">{u.username}</span>
                                 <span className="text-[10px] font-mono text-muted-foreground">({u.discordId})</span>
                               </div>

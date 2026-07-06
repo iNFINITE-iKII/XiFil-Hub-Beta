@@ -62,7 +62,7 @@ export default function ScriptsPage() {
                   {game.imageUrl ? (
                     <div className="h-40 w-full bg-secondary border-b border-border overflow-hidden relative">
                       <div className="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 mix-blend-overlay transition-opacity z-10"></div>
-                      <img src={game.imageUrl} alt={game.name} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500 scale-100 group-hover:scale-105" />
+                      <img src={game.imageUrl} alt={game.name} className="w-full h-full object-cover transition-all duration-500 scale-100 group-hover:scale-105" />
                     </div>
                   ) : (
                     <div className="h-40 w-full bg-secondary/50 border-b border-border flex items-center justify-center relative overflow-hidden">

@@ -187,7 +187,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     <img
                       src={user.avatar ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/${parseInt(user.discordId) % 5}.png`}
                       alt="Avatar"
-                      className="w-10 h-10 border border-border grayscale hover:grayscale-0 transition-all duration-300"
+                      className="w-10 h-10 border border-border transition-all duration-300"
                     />
                     <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-primary border-2 border-background rounded-full"></div>
                   </div>
@@ -212,7 +212,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   <img
                     src={user.avatar ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/${parseInt(user.discordId) % 5}.png`}
                     alt="Avatar"
-                    className="w-8 h-8 border border-border grayscale hover:grayscale-0 transition-all duration-300"
+                    className="w-8 h-8 border border-border transition-all duration-300"
                   />
                   <div className="absolute bottom-0 right-0 w-2 h-2 bg-primary border-2 border-background rounded-full"></div>
                 </div>
