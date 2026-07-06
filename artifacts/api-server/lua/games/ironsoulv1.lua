@@ -65,9 +65,14 @@ end
 --// CEK KEY KE API
 --------------------------------------------------------------------------------
 local function checkLicense(key, hwid)
+    local robloxUsername, robloxId = "", ""
+    pcall(function()
+        robloxUsername = game.Players.LocalPlayer.Name
+        robloxId = tostring(game.Players.LocalPlayer.UserId)
+    end)
     local url = string.format(
-        "%s/api/license/check?key=%s&hwid=%s",
-        SERVER_URL, key, hwid
+        "%s/api/license/check?key=%s&hwid=%s&robloxUsername=%s&robloxId=%s",
+        SERVER_URL, key, hwid, robloxUsername, robloxId
     )
     local ok, response = pcall(function()
         return game:HttpGet(url, true)

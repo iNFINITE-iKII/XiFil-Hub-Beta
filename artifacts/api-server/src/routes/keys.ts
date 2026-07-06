@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { licenseKeysTable, gamesTable, usersTable, adminSettingsTable, whitelistTable } from "@workspace/db";
+import { licenseKeysTable, gamesTable, usersTable, adminSettingsTable, whitelistTable, linkedRobloxAccountsTable } from "@workspace/db";
 import { eq, and, inArray, count } from "drizzle-orm";
 import crypto from "crypto";
 
@@ -13,11 +13,31 @@ function generateKeyString(prefix = "XIFIL"): string {
   return `${prefix}-${segments.join("-")}`;
 }
 
+async function getLinkedRobloxAccounts(keyIds: number[]) {
+  if (keyIds.length === 0) return new Map<number, Array<{ robloxUsername: string; robloxId: string | null; linkedAt: string }>>();
+  const rows = await db
+    .select()
+    .from(linkedRobloxAccountsTable)
+    .where(inArray(linkedRobloxAccountsTable.licenseKeyId, keyIds));
+  const map = new Map<number, Array<{ robloxUsername: string; robloxId: string | null; linkedAt: string }>>();
+  for (const row of rows) {
+    const list = map.get(row.licenseKeyId) ?? [];
+    list.push({ robloxUsername: row.robloxUsername, robloxId: row.robloxId, linkedAt: row.linkedAt.toISOString() });
+    map.set(row.licenseKeyId, list);
+  }
+  return map;
+}
+
 function formatKey(
   key: typeof licenseKeysTable.$inferSelect,
   gameName?: string | null,
-  username?: string | null
+  username?: string | null,
+  opts?: {
+    linkedRobloxAccounts?: Array<{ robloxUsername: string; robloxId: string | null; linkedAt: string }>;
+    robloxMaxSlots?: number;
+  }
 ) {
+  const linkedRobloxAccounts = opts?.linkedRobloxAccounts ?? [];
   return {
     id: key.id,
     key: key.key,
@@ -30,6 +50,11 @@ function formatKey(
     expiresAt: key.expiresAt ? key.expiresAt.toISOString() : null,
     hwidResetCount: key.hwidResetCount,
     hwidLastResetAt: key.hwidLastResetAt ? key.hwidLastResetAt.toISOString() : null,
+    robloxResetCount: key.robloxResetCount,
+    robloxLastResetAt: key.robloxLastResetAt ? key.robloxLastResetAt.toISOString() : null,
+    linkedRobloxAccounts,
+    robloxSlotsUsed: linkedRobloxAccounts.length,
+    robloxSlotsMax: opts?.robloxMaxSlots ?? key.keyMaxRobloxPerKey ?? null,
     createdAt: key.createdAt.toISOString(),
     // Per-key overrides (null = inherit from global admin_settings)
     keyMaxAutoClaimKeys: key.keyMaxAutoClaimKeys ?? null,
@@ -37,6 +62,8 @@ function formatKey(
     keyMaxRobloxPerKey: key.keyMaxRobloxPerKey ?? null,
     keyHwidResetLimit: key.keyHwidResetLimit ?? null,
     keyHwidResetCooldownHours: key.keyHwidResetCooldownHours ?? null,
+    keyRobloxResetLimit: key.keyRobloxResetLimit ?? null,
+    keyRobloxResetCooldownHours: key.keyRobloxResetCooldownHours ?? null,
   };
 }
 
@@ -72,7 +99,17 @@ router.get("/", requireAuth, async (req, res) => {
     .from(licenseKeysTable)
     .leftJoin(gamesTable, eq(licenseKeysTable.gameId, gamesTable.id))
     .where(eq(licenseKeysTable.userId, userId));
-  res.json(rows.map((r) => formatKey(r.key, r.game?.name, null)));
+
+  const settings = await getSettings();
+  const linkedMap = await getLinkedRobloxAccounts(rows.map((r) => r.key.id));
+  res.json(
+    rows.map((r) =>
+      formatKey(r.key, r.game?.name, null, {
+        linkedRobloxAccounts: linkedMap.get(r.key.id) ?? [],
+        robloxMaxSlots: r.key.keyMaxRobloxPerKey ?? settings.maxRobloxPerKey,
+      })
+    )
+  );
 });
 
 // POST /api/keys/claim — user claims a key by entering the key string
@@ -118,6 +155,70 @@ router.post("/claim", requireAuth, async (req, res): Promise<void> => {
 
   const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
   res.status(200).json(formatKey(updated, game?.name, null));
+});
+
+// POST /api/keys/my-roblox-reset — user resets (clears) linked Roblox accounts for their key
+router.post("/my-roblox-reset", requireAuth, async (req, res): Promise<void> => {
+  const userId = (req.session as any).userId as number;
+  const { keyId } = req.body as { keyId: number };
+
+  if (!keyId) {
+    res.status(400).json({ error: "keyId is required" });
+    return;
+  }
+
+  const [licenseKey] = await db
+    .select()
+    .from(licenseKeysTable)
+    .where(and(eq(licenseKeysTable.id, keyId), eq(licenseKeysTable.userId, userId)));
+
+  if (!licenseKey) {
+    res.status(404).json({ error: "Key not found or not owned by you" });
+    return;
+  }
+
+  if (licenseKey.status !== "active") {
+    res.status(400).json({ error: "Only active keys can be reset" });
+    return;
+  }
+
+  const settings = await getSettings();
+  const resetLimit = licenseKey.keyRobloxResetLimit ?? settings.robloxResetLimit;
+  const cooldownHours = licenseKey.keyRobloxResetCooldownHours ?? settings.robloxResetCooldownHours;
+
+  if (licenseKey.robloxResetCount >= resetLimit) {
+    res.status(400).json({ error: `Batas reset slot Roblox tercapai (maks ${resetLimit}x). Hubungi admin untuk menambah slot.` });
+    return;
+  }
+
+  if (licenseKey.robloxLastResetAt) {
+    const cooldownMs = cooldownHours * 60 * 60 * 1000;
+    const nextResetAt = new Date(licenseKey.robloxLastResetAt.getTime() + cooldownMs);
+    if (new Date() < nextResetAt) {
+      res.status(429).json({
+        error: "Cooldown active",
+        nextResetAt: nextResetAt.toISOString(),
+      });
+      return;
+    }
+  }
+
+  await db.delete(linkedRobloxAccountsTable).where(eq(linkedRobloxAccountsTable.licenseKeyId, keyId));
+
+  const [updated] = await db
+    .update(licenseKeysTable)
+    .set({
+      robloxResetCount: licenseKey.robloxResetCount + 1,
+      robloxLastResetAt: new Date(),
+    })
+    .where(eq(licenseKeysTable.id, keyId))
+    .returning();
+
+  // Bersihkan juga identitas Roblox utama di profil user (kompat lama)
+  await db.update(usersTable).set({ robloxUsername: null, robloxId: null }).where(eq(usersTable.id, userId));
+
+  const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
+  res.json(formatKey(updated, game?.name, null, { linkedRobloxAccounts: [], robloxMaxSlots: updated.keyMaxRobloxPerKey ?? settings.maxRobloxPerKey }));
 });
 
 // POST /api/keys/my-hwid-reset — user resets their own HWID (with cooldown)
@@ -356,12 +457,22 @@ router.patch("/:id/settings", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid key ID" }); return; }
 
-  const { keyMaxAutoClaimKeys, keyMaxHwidPerKey, keyMaxRobloxPerKey, keyHwidResetLimit, keyHwidResetCooldownHours } = req.body as {
+  const {
+    keyMaxAutoClaimKeys,
+    keyMaxHwidPerKey,
+    keyMaxRobloxPerKey,
+    keyHwidResetLimit,
+    keyHwidResetCooldownHours,
+    keyRobloxResetLimit,
+    keyRobloxResetCooldownHours,
+  } = req.body as {
     keyMaxAutoClaimKeys?: number | null;
     keyMaxHwidPerKey?: number | null;
     keyMaxRobloxPerKey?: number | null;
     keyHwidResetLimit?: number | null;
     keyHwidResetCooldownHours?: number | null;
+    keyRobloxResetLimit?: number | null;
+    keyRobloxResetCooldownHours?: number | null;
   };
 
   // Validate numeric fields if provided (not null)
@@ -376,6 +487,8 @@ router.patch("/:id/settings", requireAdmin, async (req, res): Promise<void> => {
     validate(keyMaxRobloxPerKey, 1, 100, "keyMaxRobloxPerKey"),
     validate(keyHwidResetLimit, 0, 100, "keyHwidResetLimit"),
     validate(keyHwidResetCooldownHours, 0, 87600, "keyHwidResetCooldownHours"),
+    validate(keyRobloxResetLimit, 0, 100, "keyRobloxResetLimit"),
+    validate(keyRobloxResetCooldownHours, 0, 87600, "keyRobloxResetCooldownHours"),
   ].filter(Boolean);
   if (errs.length) { res.status(400).json({ error: errs.join("; ") }); return; }
 
@@ -390,6 +503,8 @@ router.patch("/:id/settings", requireAdmin, async (req, res): Promise<void> => {
       keyMaxRobloxPerKey: keyMaxRobloxPerKey !== undefined ? keyMaxRobloxPerKey : existing.keyMaxRobloxPerKey,
       keyHwidResetLimit: keyHwidResetLimit !== undefined ? keyHwidResetLimit : existing.keyHwidResetLimit,
       keyHwidResetCooldownHours: keyHwidResetCooldownHours !== undefined ? keyHwidResetCooldownHours : existing.keyHwidResetCooldownHours,
+      keyRobloxResetLimit: keyRobloxResetLimit !== undefined ? keyRobloxResetLimit : existing.keyRobloxResetLimit,
+      keyRobloxResetCooldownHours: keyRobloxResetCooldownHours !== undefined ? keyRobloxResetCooldownHours : existing.keyRobloxResetCooldownHours,
     })
     .where(eq(licenseKeysTable.id, id))
     .returning();
@@ -421,7 +536,39 @@ router.post("/:id/reset-hwid", requireAdmin, async (req, res): Promise<void> => 
   }
 
   // Jika diminta, hapus juga link Roblox pemilik key
-  if (clearRoblox && updated.userId) {
+  if (clearRoblox) {
+    await db.delete(linkedRobloxAccountsTable).where(eq(linkedRobloxAccountsTable.licenseKeyId, updated.id));
+    if (updated.userId) {
+      await db
+        .update(usersTable)
+        .set({ robloxUsername: null, robloxId: null })
+        .where(eq(usersTable.id, updated.userId));
+    }
+  }
+
+  const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
+  res.json(formatKey(updated, game?.name, null));
+});
+
+// POST /api/keys/:id/reset-roblox — admin resets (clears) all linked Roblox accounts for a key
+router.post("/:id/reset-roblox", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid key ID" }); return; }
+
+  const [updated] = await db
+    .update(licenseKeysTable)
+    .set({ robloxResetCount: 0, robloxLastResetAt: null })
+    .where(eq(licenseKeysTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Key not found" });
+    return;
+  }
+
+  await db.delete(linkedRobloxAccountsTable).where(eq(linkedRobloxAccountsTable.licenseKeyId, id));
+
+  if (updated.userId) {
     await db
       .update(usersTable)
       .set({ robloxUsername: null, robloxId: null })
@@ -429,7 +576,7 @@ router.post("/:id/reset-hwid", requireAdmin, async (req, res): Promise<void> => 
   }
 
   const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
-  res.json(formatKey(updated, game?.name, null));
+  res.json(formatKey(updated, game?.name, null, { linkedRobloxAccounts: [] }));
 });
 
 // DELETE /api/keys/:id — revoke key (admin)

@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { licenseKeysTable, usersTable } from "@workspace/db";
+import { licenseKeysTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
+import { linkRobloxAccount } from "../lib/robloxLink";
 
 const router = Router();
 
@@ -72,6 +73,7 @@ router.post("/validate", async (req, res): Promise<void> => {
   // HWID check (atomic first-bind): gunakan conditional UPDATE agar race-condition safe.
   // Jika hwid masih NULL → update atomik WHERE hwid IS NULL.
   // Jika update tidak mempengaruhi baris (sudah di-bind lebih dulu), baca ulang dan bandingkan.
+  let boundKey = licenseKey;
   if (licenseKey.hwid === null) {
     const bound = await db
       .update(licenseKeysTable)
@@ -89,29 +91,21 @@ router.post("/validate", async (req, res): Promise<void> => {
         res.json({ valid: false, message: "HWID tidak cocok. Hubungi admin untuk reset." });
         return;
       }
+      boundKey = fresh;
+    } else {
+      boundKey = bound[0];
     }
   } else if (licenseKey.hwid !== hwid.trim()) {
     res.json({ valid: false, message: "HWID tidak cocok. Hubungi admin untuk reset." });
     return;
   }
 
-  // Auto-link Roblox: hanya jika user BELUM punya link Roblox (first-link only).
-  // Mencegah public endpoint ini dipakai untuk menimpa identitas Roblox yang sudah ada.
-  if (robloxUsername && typeof robloxUsername === "string" && licenseKey.userId) {
-    const [owner] = await db
-      .select({ robloxUsername: usersTable.robloxUsername })
-      .from(usersTable)
-      .where(eq(usersTable.id, licenseKey.userId));
-
-    if (owner && owner.robloxUsername === null) {
-      const robloxIdStr = robloxId != null ? String(robloxId) : null;
-      await db
-        .update(usersTable)
-        .set({
-          robloxUsername: robloxUsername.trim(),
-          robloxId: robloxIdStr,
-        })
-        .where(and(eq(usersTable.id, licenseKey.userId), isNull(usersTable.robloxUsername)));
+  // Auto-link akun Roblox, dengan enforcement slot maksimal per key.
+  if (robloxUsername && typeof robloxUsername === "string") {
+    const linkResult = await linkRobloxAccount(boundKey, robloxUsername, robloxId ?? null);
+    if (!linkResult.ok) {
+      res.json({ valid: false, message: linkResult.message });
+      return;
     }
   }
 

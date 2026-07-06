@@ -6,6 +6,8 @@ export const adminSettingsTable = pgTable("admin_settings", {
   defaultGameId: integer("default_game_id"),
   hwidResetLimit: integer("hwid_reset_limit").notNull().default(1),
   hwidResetCooldownHours: integer("hwid_reset_cooldown_hours").notNull().default(168),
+  robloxResetLimit: integer("roblox_reset_limit").notNull().default(1),
+  robloxResetCooldownHours: integer("roblox_reset_cooldown_hours").notNull().default(168),
   keyPrefix: text("key_prefix").notNull().default("XIFIL"),
   // Whitelist auto-claim
   maxAutoClaimKeys: integer("max_auto_claim_keys").notNull().default(1),

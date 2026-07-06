@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable, gamesTable, licenseKeysTable, adminSettingsTable, whitelistTable } from "@workspace/db";
-import { eq, count, gte, or, ilike, sql } from "drizzle-orm";
+import { usersTable, gamesTable, licenseKeysTable, adminSettingsTable, whitelistTable, linkedRobloxAccountsTable } from "@workspace/db";
+import { eq, count, gte, or, ilike, sql, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -92,27 +92,49 @@ router.get("/keys", requireAdmin, async (req, res) => {
     .leftJoin(usersTable, eq(licenseKeysTable.userId, usersTable.id))
     .orderBy(licenseKeysTable.createdAt);
 
+  const keyIds = rows.map((r) => r.key.id);
+  const linkedRows = keyIds.length
+    ? await db.select().from(linkedRobloxAccountsTable).where(inArray(linkedRobloxAccountsTable.licenseKeyId, keyIds))
+    : [];
+  const settings = await getOrCreateSettings();
+  const linkedMap = new Map<number, Array<{ robloxUsername: string; robloxId: string | null; linkedAt: string }>>();
+  for (const row of linkedRows) {
+    const list = linkedMap.get(row.licenseKeyId) ?? [];
+    list.push({ robloxUsername: row.robloxUsername, robloxId: row.robloxId, linkedAt: row.linkedAt.toISOString() });
+    linkedMap.set(row.licenseKeyId, list);
+  }
+
   res.json(
-    rows.map((r) => ({
-      id: r.key.id,
-      key: r.key.key,
-      gameId: r.key.gameId,
-      gameName: r.game?.name ?? null,
-      userId: r.key.userId,
-      username: r.user?.username ?? null,
-      hwid: r.key.hwid,
-      status: r.key.status,
-      expiresAt: r.key.expiresAt ? r.key.expiresAt.toISOString() : null,
-      hwidResetCount: r.key.hwidResetCount,
-      hwidLastResetAt: r.key.hwidLastResetAt ? r.key.hwidLastResetAt.toISOString() : null,
-      createdAt: r.key.createdAt.toISOString(),
-      // Per-key overrides
-      keyMaxAutoClaimKeys: r.key.keyMaxAutoClaimKeys ?? null,
-      keyMaxHwidPerKey: r.key.keyMaxHwidPerKey ?? null,
-      keyMaxRobloxPerKey: r.key.keyMaxRobloxPerKey ?? null,
-      keyHwidResetLimit: r.key.keyHwidResetLimit ?? null,
-      keyHwidResetCooldownHours: r.key.keyHwidResetCooldownHours ?? null,
-    }))
+    rows.map((r) => {
+      const linkedRobloxAccounts = linkedMap.get(r.key.id) ?? [];
+      return {
+        id: r.key.id,
+        key: r.key.key,
+        gameId: r.key.gameId,
+        gameName: r.game?.name ?? null,
+        userId: r.key.userId,
+        username: r.user?.username ?? null,
+        hwid: r.key.hwid,
+        status: r.key.status,
+        expiresAt: r.key.expiresAt ? r.key.expiresAt.toISOString() : null,
+        hwidResetCount: r.key.hwidResetCount,
+        hwidLastResetAt: r.key.hwidLastResetAt ? r.key.hwidLastResetAt.toISOString() : null,
+        robloxResetCount: r.key.robloxResetCount,
+        robloxLastResetAt: r.key.robloxLastResetAt ? r.key.robloxLastResetAt.toISOString() : null,
+        linkedRobloxAccounts,
+        robloxSlotsUsed: linkedRobloxAccounts.length,
+        robloxSlotsMax: r.key.keyMaxRobloxPerKey ?? settings.maxRobloxPerKey,
+        createdAt: r.key.createdAt.toISOString(),
+        // Per-key overrides
+        keyMaxAutoClaimKeys: r.key.keyMaxAutoClaimKeys ?? null,
+        keyMaxHwidPerKey: r.key.keyMaxHwidPerKey ?? null,
+        keyMaxRobloxPerKey: r.key.keyMaxRobloxPerKey ?? null,
+        keyHwidResetLimit: r.key.keyHwidResetLimit ?? null,
+        keyHwidResetCooldownHours: r.key.keyHwidResetCooldownHours ?? null,
+        keyRobloxResetLimit: r.key.keyRobloxResetLimit ?? null,
+        keyRobloxResetCooldownHours: r.key.keyRobloxResetCooldownHours ?? null,
+      };
+    })
   );
 });
 
@@ -178,6 +200,12 @@ router.post("/users/:id/reset-roblox", requireAdmin, async (req, res): Promise<v
   if (!user) {
     res.status(404).json({ error: "User not found" });
     return;
+  }
+
+  // Bersihkan juga semua slot akun Roblox yang terhubung ke key-key milik user ini
+  const ownedKeys = await db.select({ id: licenseKeysTable.id }).from(licenseKeysTable).where(eq(licenseKeysTable.userId, id));
+  if (ownedKeys.length > 0) {
+    await db.delete(linkedRobloxAccountsTable).where(inArray(linkedRobloxAccountsTable.licenseKeyId, ownedKeys.map((k) => k.id)));
   }
 
   res.json({ message: "Roblox account unlinked" });
