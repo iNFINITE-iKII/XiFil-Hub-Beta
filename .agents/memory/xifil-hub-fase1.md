@@ -30,3 +30,13 @@ description: Summary of all implemented routes and pages across Fase 1 and Fase 
 - Roblox linking: auto via DRM on first valid request; admin can override via set-roblox; users cannot self-link
 - Whitelist redeem quota enforcement is atomic (DB transaction + FOR UPDATE aggregate) — prevents race-condition over-claim
 - `maxAutoClaimKeys = 0` means redeem disabled; frontend correctly preserves 0 via `Number.isNaN()` guard (not `|| 1`)
+
+## Per-key settings (added later)
+- `license_keys` table has 5 nullable override columns: `key_max_auto_claim_keys`, `key_max_hwid_per_key`, `key_max_roblox_per_key`, `key_hwid_reset_limit`, `key_hwid_reset_cooldown_hours`
+- Migration SQL in `scripts/migrate-key-settings.sql` — must be run manually against Neon
+- `PATCH /api/keys/:id/settings` — admin can set overrides per key; null = inherit global
+- `GET /api/admin/keys` returns all 5 override fields so the frontend dialog can prefill correctly
+- `my-hwid-reset` uses per-key limit/cooldown with fallback to global settings
+- whitelist-redeem transaction uses highest per-key maxAutoClaimKeys across user's existing keys (or global)
+- `GET /api/admin/users/search?q=` — searches logged-in users by username/discordId (ilike), returns up to 10; used by whitelist add combobox
+- Whitelist add UI: search-as-you-type combobox (debounced 300ms); raw Discord ID still works if no match

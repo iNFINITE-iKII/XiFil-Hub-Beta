@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { usersTable, gamesTable, licenseKeysTable, adminSettingsTable, whitelistTable } from "@workspace/db";
-import { eq, count, gte } from "drizzle-orm";
+import { eq, count, gte, or, ilike, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -62,6 +62,27 @@ router.get("/users", requireAdmin, async (req, res) => {
   );
 });
 
+// GET /api/admin/users/search?q=... — search logged-in users by username or Discord ID
+router.get("/users/search", requireAdmin, async (req, res): Promise<void> => {
+  const q = String(req.query.q ?? "").trim();
+  if (!q) { res.json([]); return; }
+
+  const users = await db
+    .select()
+    .from(usersTable)
+    .where(or(ilike(usersTable.username, `%${q}%`), ilike(usersTable.discordId, `%${q}%`)))
+    .limit(10);
+
+  res.json(
+    users.map((u) => ({
+      id: u.id,
+      discordId: u.discordId,
+      username: u.username,
+      avatar: u.avatar,
+    }))
+  );
+});
+
 // GET /api/admin/keys
 router.get("/keys", requireAdmin, async (req, res) => {
   const rows = await db
@@ -85,6 +106,12 @@ router.get("/keys", requireAdmin, async (req, res) => {
       hwidResetCount: r.key.hwidResetCount,
       hwidLastResetAt: r.key.hwidLastResetAt ? r.key.hwidLastResetAt.toISOString() : null,
       createdAt: r.key.createdAt.toISOString(),
+      // Per-key overrides
+      keyMaxAutoClaimKeys: r.key.keyMaxAutoClaimKeys ?? null,
+      keyMaxHwidPerKey: r.key.keyMaxHwidPerKey ?? null,
+      keyMaxRobloxPerKey: r.key.keyMaxRobloxPerKey ?? null,
+      keyHwidResetLimit: r.key.keyHwidResetLimit ?? null,
+      keyHwidResetCooldownHours: r.key.keyHwidResetCooldownHours ?? null,
     }))
   );
 });

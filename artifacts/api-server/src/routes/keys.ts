@@ -31,6 +31,12 @@ function formatKey(
     hwidResetCount: key.hwidResetCount,
     hwidLastResetAt: key.hwidLastResetAt ? key.hwidLastResetAt.toISOString() : null,
     createdAt: key.createdAt.toISOString(),
+    // Per-key overrides (null = inherit from global admin_settings)
+    keyMaxAutoClaimKeys: key.keyMaxAutoClaimKeys ?? null,
+    keyMaxHwidPerKey: key.keyMaxHwidPerKey ?? null,
+    keyMaxRobloxPerKey: key.keyMaxRobloxPerKey ?? null,
+    keyHwidResetLimit: key.keyHwidResetLimit ?? null,
+    keyHwidResetCooldownHours: key.keyHwidResetCooldownHours ?? null,
   };
 }
 
@@ -140,14 +146,17 @@ router.post("/my-hwid-reset", requireAuth, async (req, res): Promise<void> => {
   }
 
   const settings = await getSettings();
+  // Per-key override takes priority over global setting
+  const resetLimit = licenseKey.keyHwidResetLimit ?? settings.hwidResetLimit;
+  const cooldownHours = licenseKey.keyHwidResetCooldownHours ?? settings.hwidResetCooldownHours;
 
-  if (licenseKey.hwidResetCount >= settings.hwidResetLimit) {
-    res.status(400).json({ error: `HWID reset limit reached (${settings.hwidResetLimit} resets allowed)` });
+  if (licenseKey.hwidResetCount >= resetLimit) {
+    res.status(400).json({ error: `HWID reset limit reached (${resetLimit} resets allowed)` });
     return;
   }
 
   if (licenseKey.hwidLastResetAt) {
-    const cooldownMs = settings.hwidResetCooldownHours * 60 * 60 * 1000;
+    const cooldownMs = cooldownHours * 60 * 60 * 1000;
     const nextResetAt = new Date(licenseKey.hwidLastResetAt.getTime() + cooldownMs);
     if (new Date() < nextResetAt) {
       res.status(429).json({
@@ -209,14 +218,24 @@ router.post("/whitelist-redeem", requireAuth, async (req, res): Promise<void> =>
   // Cek kuota + insert secara atomik dalam satu transaksi untuk mencegah race condition
   let newKey: any;
   try {
-    newKey = await db.transaction(async (tx) => {
-      const [{ total }] = await tx
-        .select({ total: count() })
+    newKey = await db.transaction(async (tx: any) => {
+      const existingKeys = await tx
+        .select()
         .from(licenseKeysTable)
         .where(eq(licenseKeysTable.userId, userId))
-        .for("update"); // row-level lock pada aggregate
-      if (Number(total) >= settings.maxAutoClaimKeys) {
-        throw Object.assign(new Error(`Batas auto-klaim tercapai (maks ${settings.maxAutoClaimKeys} key)`), { status: 400 });
+        .for("update"); // row-level lock
+
+      // Per-key override: use the highest maxAutoClaimKeys from existing keys, or fall back to global
+      let perKeyMax: number | null = null;
+      for (const k of existingKeys) {
+        if (k.keyMaxAutoClaimKeys != null) {
+          perKeyMax = perKeyMax == null ? k.keyMaxAutoClaimKeys : Math.max(perKeyMax, k.keyMaxAutoClaimKeys);
+        }
+      }
+      const effectiveMax = perKeyMax ?? settings.maxAutoClaimKeys;
+
+      if (existingKeys.length >= effectiveMax) {
+        throw Object.assign(new Error(`Batas auto-klaim tercapai (maks ${effectiveMax} key)`), { status: 400 });
       }
       const [key] = await tx
         .insert(licenseKeysTable)
@@ -330,6 +349,58 @@ router.get("/export", requireAdmin, async (req, res) => {
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="xifil-keys-${Date.now()}.csv"`);
   res.send(lines.join("\n"));
+});
+
+// PATCH /api/keys/:id/settings — admin updates per-key override settings
+router.patch("/:id/settings", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid key ID" }); return; }
+
+  const { keyMaxAutoClaimKeys, keyMaxHwidPerKey, keyMaxRobloxPerKey, keyHwidResetLimit, keyHwidResetCooldownHours } = req.body as {
+    keyMaxAutoClaimKeys?: number | null;
+    keyMaxHwidPerKey?: number | null;
+    keyMaxRobloxPerKey?: number | null;
+    keyHwidResetLimit?: number | null;
+    keyHwidResetCooldownHours?: number | null;
+  };
+
+  // Validate numeric fields if provided (not null)
+  const validate = (v: number | null | undefined, min: number, max: number, name: string): string | null => {
+    if (v == null) return null;
+    if (!Number.isInteger(v) || v < min || v > max) return `${name} must be an integer between ${min} and ${max}`;
+    return null;
+  };
+  const errs = [
+    validate(keyMaxAutoClaimKeys, 0, 1000, "keyMaxAutoClaimKeys"),
+    validate(keyMaxHwidPerKey, 1, 100, "keyMaxHwidPerKey"),
+    validate(keyMaxRobloxPerKey, 1, 100, "keyMaxRobloxPerKey"),
+    validate(keyHwidResetLimit, 0, 100, "keyHwidResetLimit"),
+    validate(keyHwidResetCooldownHours, 0, 87600, "keyHwidResetCooldownHours"),
+  ].filter(Boolean);
+  if (errs.length) { res.status(400).json({ error: errs.join("; ") }); return; }
+
+  const [existing] = await db.select().from(licenseKeysTable).where(eq(licenseKeysTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Key not found" }); return; }
+
+  const [updated] = await db
+    .update(licenseKeysTable)
+    .set({
+      keyMaxAutoClaimKeys: keyMaxAutoClaimKeys !== undefined ? keyMaxAutoClaimKeys : existing.keyMaxAutoClaimKeys,
+      keyMaxHwidPerKey: keyMaxHwidPerKey !== undefined ? keyMaxHwidPerKey : existing.keyMaxHwidPerKey,
+      keyMaxRobloxPerKey: keyMaxRobloxPerKey !== undefined ? keyMaxRobloxPerKey : existing.keyMaxRobloxPerKey,
+      keyHwidResetLimit: keyHwidResetLimit !== undefined ? keyHwidResetLimit : existing.keyHwidResetLimit,
+      keyHwidResetCooldownHours: keyHwidResetCooldownHours !== undefined ? keyHwidResetCooldownHours : existing.keyHwidResetCooldownHours,
+    })
+    .where(eq(licenseKeysTable.id, id))
+    .returning();
+
+  const [game] = await db.select().from(gamesTable).where(eq(gamesTable.id, updated.gameId));
+  let username: string | null = null;
+  if (updated.userId) {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.userId));
+    username = user?.username ?? null;
+  }
+  res.json(formatKey(updated, game?.name, username));
 });
 
 // POST /api/keys/:id/reset-hwid — admin resets HWID for any key

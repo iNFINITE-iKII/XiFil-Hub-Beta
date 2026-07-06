@@ -46,6 +46,19 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const [keySearch, setKeySearch] = useState("");
   const [wlInput, setWlInput] = useState({ discordId: "", notes: "" });
+  const [wlSearchQuery, setWlSearchQuery] = useState("");
+  const [wlSearchDebounced, setWlSearchDebounced] = useState("");
+  const [wlSearchOpen, setWlSearchOpen] = useState(false);
+  const [wlSelectedUser, setWlSelectedUser] = useState<{ id: number; discordId: string; username: string; avatar: string | null } | null>(null);
+  const [isKeySettingsOpen, setIsKeySettingsOpen] = useState(false);
+  const [selectedKeyForSettings, setSelectedKeyForSettings] = useState<any | null>(null);
+  const [keySettingsForm, setKeySettingsForm] = useState({
+    keyMaxAutoClaimKeys: "",
+    keyMaxHwidPerKey: "",
+    keyMaxRobloxPerKey: "",
+    keyHwidResetLimit: "",
+    keyHwidResetCooldownHours: "",
+  });
   const [setRobloxInput, setSetRobloxInput] = useState("");
   const [setRobloxError, setSetRobloxError] = useState<string | null>(null);
   const [settingsForm, setSettingsForm] = useState({
@@ -87,6 +100,12 @@ export default function AdminPage() {
       });
     }
   }, [settings]);
+
+  // Debounce whitelist user search
+  useEffect(() => {
+    const t = setTimeout(() => setWlSearchDebounced(wlSearchQuery), 300);
+    return () => clearTimeout(t);
+  }, [wlSearchQuery]);
 
   const generateKey = useGenerateKey();
   const revokeKey = useRevokeKey();
@@ -208,6 +227,39 @@ export default function AdminPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-whitelist"] });
       setWlInput({ discordId: "", notes: "" });
+      setWlSearchQuery("");
+      setWlSelectedUser(null);
+    },
+  });
+
+  // User search query for whitelist add
+  const { data: wlSearchResults } = useQuery<{ id: number; discordId: string; username: string; avatar: string | null }[]>({
+    queryKey: ["user-search", wlSearchDebounced],
+    queryFn: async () => {
+      if (!wlSearchDebounced) return [];
+      const res = await fetch(apiUrl(`/api/admin/users/search?q=${encodeURIComponent(wlSearchDebounced)}`), { credentials: "include" });
+      return res.json();
+    },
+    enabled: !!user?.isAdmin && wlSearchDebounced.length >= 1,
+    staleTime: 5000,
+  });
+
+  // Key per-key settings mutation
+  const keySettingsMutation = useMutation({
+    mutationFn: async ({ keyId, settings }: { keyId: number; settings: Record<string, number | null> }) => {
+      const res = await fetch(apiUrl(`/api/keys/${keyId}/settings`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListAdminKeysQueryKey() });
+      setIsKeySettingsOpen(false);
     },
   });
 
@@ -561,6 +613,25 @@ export default function AdminPage() {
                             </TableCell>
                             <TableCell className="text-right px-6">
                               <div className="flex items-center justify-end gap-1.5">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] font-mono uppercase border-border hover:border-primary hover:text-primary rounded-none gap-1"
+                                  title="Key Settings"
+                                  onClick={() => {
+                                    setSelectedKeyForSettings(k);
+                                    setKeySettingsForm({
+                                      keyMaxAutoClaimKeys: k.keyMaxAutoClaimKeys != null ? String(k.keyMaxAutoClaimKeys) : "",
+                                      keyMaxHwidPerKey: k.keyMaxHwidPerKey != null ? String(k.keyMaxHwidPerKey) : "",
+                                      keyMaxRobloxPerKey: k.keyMaxRobloxPerKey != null ? String(k.keyMaxRobloxPerKey) : "",
+                                      keyHwidResetLimit: k.keyHwidResetLimit != null ? String(k.keyHwidResetLimit) : "",
+                                      keyHwidResetCooldownHours: k.keyHwidResetCooldownHours != null ? String(k.keyHwidResetCooldownHours) : "",
+                                    });
+                                    setIsKeySettingsOpen(true);
+                                  }}
+                                >
+                                  <Settings className="w-3 h-3" />
+                                </Button>
                                 {k.hwid && (
                                   <Button
                                     variant="outline"
@@ -763,15 +834,82 @@ export default function AdminPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6 space-y-4">
+                  {/* User search */}
                   <div className="space-y-2">
-                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Discord ID</Label>
-                    <Input
-                      className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
-                      placeholder="123456789012345678"
-                      value={wlInput.discordId}
-                      onChange={(e) => setWlInput({ ...wlInput, discordId: e.target.value.trim() })}
-                    />
-                    <p className="text-[10px] text-muted-foreground font-mono">Hanya Discord ID numerik (17–19 digit).</p>
+                    <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Cari User</Label>
+                    <div className="relative">
+                      {wlSelectedUser ? (
+                        /* Selected user chip */
+                        <div className="flex items-center gap-2 border border-primary bg-primary/10 px-3 h-9">
+                          <img
+                            src={wlSelectedUser.avatar ? `https://cdn.discordapp.com/avatars/${wlSelectedUser.discordId}/${wlSelectedUser.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`}
+                            alt=""
+                            className="w-5 h-5 rounded-full"
+                          />
+                          <span className="font-mono text-xs text-foreground flex-1 truncate">{wlSelectedUser.username}</span>
+                          <span className="font-mono text-[10px] text-muted-foreground">{wlSelectedUser.discordId}</span>
+                          <button
+                            className="ml-1 text-muted-foreground hover:text-destructive text-xs font-mono leading-none"
+                            onClick={() => { setWlSelectedUser(null); setWlInput({ ...wlInput, discordId: "" }); setWlSearchQuery(""); }}
+                          >✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                          <Input
+                            className="pl-9 rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                            placeholder="Username atau Discord ID..."
+                            value={wlSearchQuery}
+                            onChange={(e) => {
+                              setWlSearchQuery(e.target.value);
+                              setWlSearchOpen(true);
+                              // If it looks like a raw Discord ID, also fill the input directly
+                              if (/^\d{17,19}$/.test(e.target.value.trim())) {
+                                setWlInput({ ...wlInput, discordId: e.target.value.trim() });
+                              } else {
+                                setWlInput({ ...wlInput, discordId: "" });
+                              }
+                            }}
+                            onFocus={() => setWlSearchOpen(true)}
+                            onBlur={() => setTimeout(() => setWlSearchOpen(false), 150)}
+                          />
+                          {/* Dropdown results */}
+                          {wlSearchOpen && wlSearchResults && wlSearchResults.length > 0 && (
+                            <div className="absolute z-50 top-full left-0 right-0 border border-border bg-background shadow-lg">
+                              {wlSearchResults.map((u) => (
+                                <button
+                                  key={u.id}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-secondary/60 text-left transition-colors"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    setWlSelectedUser(u);
+                                    setWlInput({ ...wlInput, discordId: u.discordId });
+                                    setWlSearchQuery("");
+                                    setWlSearchOpen(false);
+                                  }}
+                                >
+                                  <img
+                                    src={u.avatar ? `https://cdn.discordapp.com/avatars/${u.discordId}/${u.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`}
+                                    alt=""
+                                    className="w-6 h-6 rounded-full border border-border"
+                                  />
+                                  <span className="font-bold text-xs text-foreground">{u.username}</span>
+                                  <span className="font-mono text-[10px] text-muted-foreground ml-auto">{u.discordId}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {wlSearchOpen && wlSearchDebounced && wlSearchResults?.length === 0 && (
+                            <div className="absolute z-50 top-full left-0 right-0 border border-border bg-background px-3 py-2">
+                              <p className="font-mono text-[10px] text-muted-foreground">
+                                {/^\d{17,19}$/.test(wlSearchQuery.trim()) ? "User belum login — Discord ID akan langsung dipakai." : "Tidak ada user yang cocok."}
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground font-mono">Ketik username atau Discord ID (17–19 digit untuk input manual).</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Notes (opsional)</Label>
@@ -929,6 +1067,145 @@ export default function AdminPage() {
                 </Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* KEY SETTINGS MODAL */}
+      {isKeySettingsOpen && selectedKeyForSettings && (
+        <Dialog open={isKeySettingsOpen} onOpenChange={(open) => { setIsKeySettingsOpen(open); if (!open) setSelectedKeyForSettings(null); }}>
+          <DialogContent className="border-border bg-background rounded-sm shadow-2xl p-0 overflow-hidden sm:max-w-md">
+            <div className="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+            <DialogHeader className="p-6 pb-4 border-b border-border bg-secondary/30">
+              <DialogTitle className="font-mono uppercase tracking-wider text-foreground flex items-center gap-2">
+                <Settings className="w-4 h-4 text-primary" /> Key Settings
+              </DialogTitle>
+              <DialogDescription className="font-mono text-xs mt-1 text-muted-foreground truncate">
+                {selectedKeyForSettings.key}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="p-6 space-y-4">
+              <p className="font-mono text-[10px] text-muted-foreground bg-secondary/40 border border-border px-3 py-2">
+                Kosongkan field untuk menggunakan nilai global dari Settings. Override hanya berlaku untuk key ini.
+              </p>
+
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max Auto-Claim Keys</Label>
+                <Input
+                  type="number" min="0"
+                  className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                  placeholder="Global default"
+                  value={keySettingsForm.keyMaxAutoClaimKeys}
+                  onChange={(e) => setKeySettingsForm({ ...keySettingsForm, keyMaxAutoClaimKeys: e.target.value })}
+                />
+                <p className="text-[10px] text-muted-foreground font-mono">Jumlah key yang bisa di-klaim otomatis oleh pemilik key ini.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max HWID per Key</Label>
+                <Input
+                  type="number" min="1"
+                  className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                  placeholder="Global default"
+                  value={keySettingsForm.keyMaxHwidPerKey}
+                  onChange={(e) => setKeySettingsForm({ ...keySettingsForm, keyMaxHwidPerKey: e.target.value })}
+                />
+                <p className="text-[10px] text-muted-foreground font-mono">Jumlah HWID yang bisa terkait ke key ini.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max Akun Roblox per Key</Label>
+                <Input
+                  type="number" min="1"
+                  className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                  placeholder="Global default"
+                  value={keySettingsForm.keyMaxRobloxPerKey}
+                  onChange={(e) => setKeySettingsForm({ ...keySettingsForm, keyMaxRobloxPerKey: e.target.value })}
+                />
+                <p className="text-[10px] text-muted-foreground font-mono">Jumlah akun Roblox yang bisa terkait ke key ini.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Max Self-Reset HWID</Label>
+                <Input
+                  type="number" min="0"
+                  className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                  placeholder="Global default"
+                  value={keySettingsForm.keyHwidResetLimit}
+                  onChange={(e) => setKeySettingsForm({ ...keySettingsForm, keyHwidResetLimit: e.target.value })}
+                />
+                <p className="text-[10px] text-muted-foreground font-mono">Jumlah reset HWID mandiri yang diizinkan untuk key ini.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase text-muted-foreground tracking-wider">Cooldown Reset HWID (Jam)</Label>
+                <Input
+                  type="number" min="0"
+                  className="rounded-none border-border bg-secondary/50 font-mono text-xs focus-visible:ring-0 focus-visible:border-primary h-9"
+                  placeholder="Global default"
+                  value={keySettingsForm.keyHwidResetCooldownHours}
+                  onChange={(e) => setKeySettingsForm({ ...keySettingsForm, keyHwidResetCooldownHours: e.target.value })}
+                />
+                <p className="text-[10px] text-muted-foreground font-mono">Waktu tunggu antar reset HWID (jam). 168 = 7 hari.</p>
+              </div>
+
+              {keySettingsMutation.isError && (
+                <p className="text-[10px] font-mono text-destructive bg-destructive/10 border border-destructive/20 px-2 py-1">
+                  {(keySettingsMutation.error as Error).message}
+                </p>
+              )}
+            </div>
+            <DialogFooter className="p-4 border-t border-border bg-secondary/20 flex justify-between gap-2">
+              <Button
+                variant="outline"
+                className="rounded-none font-mono text-xs uppercase border-border hover:bg-secondary h-9"
+                onClick={() => {
+                  // Reset all to null (clear per-key overrides)
+                  keySettingsMutation.mutate({
+                    keyId: selectedKeyForSettings.id,
+                    settings: {
+                      keyMaxAutoClaimKeys: null,
+                      keyMaxHwidPerKey: null,
+                      keyMaxRobloxPerKey: null,
+                      keyHwidResetLimit: null,
+                      keyHwidResetCooldownHours: null,
+                    },
+                  });
+                }}
+                disabled={keySettingsMutation.isPending}
+              >
+                Reset ke Global
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="rounded-none font-mono text-xs uppercase border-border hover:bg-secondary h-9"
+                  onClick={() => setIsKeySettingsOpen(false)}
+                >
+                  Batal
+                </Button>
+                <Button
+                  className="rounded-none font-mono text-xs uppercase h-9 gap-2"
+                  disabled={keySettingsMutation.isPending}
+                  onClick={() => {
+                    const parse = (v: string) => v.trim() === "" ? null : Math.max(0, parseInt(v));
+                    keySettingsMutation.mutate({
+                      keyId: selectedKeyForSettings.id,
+                      settings: {
+                        keyMaxAutoClaimKeys: parse(keySettingsForm.keyMaxAutoClaimKeys),
+                        keyMaxHwidPerKey: keySettingsForm.keyMaxHwidPerKey.trim() === "" ? null : Math.max(1, parseInt(keySettingsForm.keyMaxHwidPerKey)),
+                        keyMaxRobloxPerKey: keySettingsForm.keyMaxRobloxPerKey.trim() === "" ? null : Math.max(1, parseInt(keySettingsForm.keyMaxRobloxPerKey)),
+                        keyHwidResetLimit: parse(keySettingsForm.keyHwidResetLimit),
+                        keyHwidResetCooldownHours: parse(keySettingsForm.keyHwidResetCooldownHours),
+                      },
+                    });
+                  }}
+                >
+                  {keySettingsMutation.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+                  Simpan
+                </Button>
+              </div>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
