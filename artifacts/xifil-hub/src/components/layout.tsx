@@ -5,6 +5,30 @@ import { Terminal, KeyRound, Gamepad2, ShieldAlert, LogOut, Loader2, ChevronRigh
 import { Button } from "./ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+const LOGO_URL = `${BASE}/logo.png`;
+
+/** Menampilkan logo gambar jika ada, fallback ke Terminal icon */
+function LogoIcon({ size = "md" }: { size?: "sm" | "md" }) {
+  const [err, setErr] = useState(false);
+  const px = size === "sm" ? "w-6 h-6" : "w-8 h-8";
+  if (err) {
+    return (
+      <div className={`${px} bg-primary text-primary-foreground flex items-center justify-center font-mono font-bold box-glow flex-shrink-0`}>
+        <Terminal className={size === "sm" ? "w-3 h-3" : "w-4 h-4"} />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={LOGO_URL}
+      alt="Logo"
+      className={`${px} object-contain flex-shrink-0`}
+      onError={() => setErr(true)}
+    />
+  );
+}
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { data: user, isLoading } = useGetMe();
@@ -62,9 +86,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 className="flex-1 overflow-hidden"
               >
                 <Link href="/dashboard" className="flex items-center gap-3 group">
-                  <div className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center font-mono font-bold text-lg box-glow flex-shrink-0">
-                    <Terminal className="w-4 h-4" />
-                  </div>
+                  <LogoIcon size="md" />
                   <div className="flex flex-col overflow-hidden">
                     <span className="font-mono font-bold text-lg tracking-tight leading-none text-foreground group-hover:text-primary transition-colors whitespace-nowrap">
                       XiFil<span className="text-primary">.Hub</span>
@@ -79,8 +101,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </AnimatePresence>
 
           {collapsed && (
-            <Link href="/dashboard" className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center font-mono font-bold box-glow mx-auto">
-              <Terminal className="w-4 h-4" />
+            <Link href="/dashboard" className="mx-auto">
+              <LogoIcon size="md" />
             </Link>
           )}
 
@@ -212,9 +234,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="w-full md:hidden border-b border-border bg-card flex flex-col z-10">
         <div className="p-4 border-b border-border flex items-center gap-3">
           <Link href="/dashboard" className="flex items-center gap-3 group">
-            <div className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center font-mono font-bold text-lg box-glow">
-              <Terminal className="w-4 h-4" />
-            </div>
+            <LogoIcon size="md" />
             <div className="flex flex-col">
               <span className="font-mono font-bold text-lg tracking-tight leading-none text-foreground group-hover:text-primary transition-colors">
                 XiFil<span className="text-primary">.Hub</span>

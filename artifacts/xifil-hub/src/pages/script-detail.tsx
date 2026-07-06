@@ -58,6 +58,18 @@ export default function ScriptDetailPage() {
           </div>
         </div>
 
+        {/* Game banner image */}
+        {(game as any).imageUrl && (
+          <div className="relative w-full h-48 md:h-64 overflow-hidden border border-border rounded-sm mb-2">
+            <img
+              src={(game as any).imageUrl}
+              alt={game.name}
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent" />
+          </div>
+        )}
+
         <div className="border-b border-border pb-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
