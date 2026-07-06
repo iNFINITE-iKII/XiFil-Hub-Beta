@@ -1,20 +1,24 @@
 import React from "react";
 import { Redirect } from "wouter";
-import { useGetMe } from "@workspace/api-client-react";
+import { useGetMe, useListMyKeys } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, User, ExternalLink, LinkIcon, ShieldOff } from "lucide-react";
+import { Loader2, User, ExternalLink, LinkIcon, ShieldOff, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function ProfilePage() {
   const { data: user, isLoading } = useGetMe();
+  const { data: keys } = useListMyKeys({ query: { enabled: !!user } });
 
   if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center text-primary"><Loader2 className="animate-spin w-8 h-8" /></div>;
   if (!user) return <Redirect to="/" />;
 
   const robloxLinked = (user as any).robloxUsername;
   const robloxId = (user as any).robloxId;
+
+  const keysWithRoblox = (keys ?? []).filter((k: any) => (k.linkedRobloxAccounts ?? []).length > 0);
+  const anyFull = (keys ?? []).some((k: any) => (k.robloxSlotsUsed ?? 0) >= (k.robloxSlotsMax ?? 1));
 
   return (
     <AppLayout>
@@ -117,6 +121,54 @@ export default function ProfilePage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Slot full notification */}
+        {anyFull && (
+          <div className="flex items-start gap-3 border border-orange-500/40 bg-orange-500/10 px-4 py-3">
+            <AlertCircle className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-mono font-bold uppercase text-orange-500">Slot Maksimal Akun Roblox Full</p>
+              <p className="text-[11px] font-mono text-muted-foreground mt-1 leading-relaxed">
+                Salah satu key kamu sudah mencapai batas jumlah akun Roblox yang bisa dipakai. Reset slot lewat halaman License Management, atau hubungi admin untuk menambah slot.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Linked Roblox Accounts per key */}
+        {keysWithRoblox.length > 0 && (
+          <Card className="border-border bg-card shadow-none rounded-sm">
+            <CardHeader className="border-b border-border bg-secondary/30 py-4">
+              <CardTitle className="text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                <LinkIcon className="w-4 h-4 text-primary" /> Akun Roblox per Key
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {keysWithRoblox.map((k: any) => {
+                const used = k.robloxSlotsUsed ?? (k.linkedRobloxAccounts ?? []).length;
+                const max = k.robloxSlotsMax ?? 1;
+                const isFull = used >= max;
+                return (
+                  <div key={k.id} className="border border-border p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="font-mono text-xs text-foreground font-bold truncate">{k.gameName || `Module_#${k.gameId}`} — <span className="text-muted-foreground">{k.key}</span></p>
+                      <span className={`font-mono text-[10px] uppercase px-1.5 py-0.5 border ${isFull ? "border-destructive text-destructive bg-destructive/10" : "border-primary/40 text-primary bg-primary/10"}`}>
+                        {used}/{max} slot
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {(k.linkedRobloxAccounts ?? []).map((acc: any) => (
+                        <Badge key={acc.robloxUsername} variant="outline" className="rounded-none border-border font-mono text-[10px] px-2 py-0.5">
+                          {acc.robloxUsername}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
       </motion.div>
     </AppLayout>
   );

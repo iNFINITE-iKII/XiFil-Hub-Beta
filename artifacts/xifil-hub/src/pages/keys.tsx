@@ -90,6 +90,28 @@ export default function KeysPage() {
     },
   });
 
+  const [robloxResetError, setRobloxResetError] = useState<string | null>(null);
+  const robloxResetMutation = useMutation({
+    mutationFn: async (keyId: number) => {
+      const res = await fetch(getApiUrl("/api/keys/my-roblox-reset"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyId }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Reset failed");
+      return data;
+    },
+    onSuccess: () => {
+      setRobloxResetError(null);
+      queryClient.invalidateQueries({ queryKey: getListMyKeysQueryKey() });
+    },
+    onError: (err: Error) => {
+      setRobloxResetError(err.message);
+    },
+  });
+
   if (isUserLoading) return <div className="min-h-screen bg-background flex items-center justify-center text-primary"><Loader2 className="animate-spin w-8 h-8" /></div>;
   if (userError || !user) return <Redirect to="/" />;
 
@@ -175,6 +197,25 @@ export default function KeysPage() {
           </div>
         </div>
 
+        {robloxResetError && (
+          <div className="flex items-center gap-2 text-destructive bg-destructive/10 border border-destructive/20 px-4 py-3">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <p className="text-xs font-mono">{robloxResetError}</p>
+          </div>
+        )}
+
+        {(keys ?? []).some((k) => ((k as any).robloxSlotsUsed ?? 0) >= ((k as any).robloxSlotsMax ?? 1)) && (
+          <div className="flex items-start gap-3 border border-orange-500/40 bg-orange-500/10 px-4 py-3">
+            <AlertCircle className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-mono font-bold uppercase text-orange-500">Slot Maksimal Akun Roblox Full</p>
+              <p className="text-[11px] font-mono text-muted-foreground mt-1 leading-relaxed">
+                Salah satu key kamu sudah mencapai batas akun Roblox yang bisa dipakai. Reset slot di key terkait, atau hubungi admin untuk menambah slot.
+              </p>
+            </div>
+          </div>
+        )}
+
         <Card className="border-border bg-card shadow-none rounded-sm overflow-hidden">
           <CardHeader className="bg-secondary/30 border-b border-border py-4 px-6">
             <CardTitle className="text-sm font-mono uppercase tracking-wider flex items-center gap-2">
@@ -200,6 +241,7 @@ export default function KeysPage() {
                       <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Target Module</TableHead>
                       <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Status</TableHead>
                       <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">HWID Lock</TableHead>
+                      <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Slot Roblox</TableHead>
                       <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10">Expiration</TableHead>
                       <TableHead className="font-mono text-[10px] uppercase tracking-wider h-10 text-right px-6">Actions</TableHead>
                     </TableRow>
@@ -239,6 +281,30 @@ export default function KeysPage() {
                             {maskHwid(key.hwid)}
                           </TableCell>
                           <TableCell>
+                            {(() => {
+                              const linked = (key as any).linkedRobloxAccounts ?? [];
+                              const used = (key as any).robloxSlotsUsed ?? linked.length;
+                              const max = (key as any).robloxSlotsMax ?? 1;
+                              const isFull = used >= max;
+                              return (
+                                <div className="flex flex-col gap-1">
+                                  <span className={`font-mono text-xs ${isFull ? "text-destructive font-bold" : "text-muted-foreground"}`}>
+                                    {used}/{max} {isFull && "(FULL)"}
+                                  </span>
+                                  {linked.length > 0 && (
+                                    <div className="flex flex-col gap-0.5">
+                                      {linked.map((acc: any) => (
+                                        <span key={acc.robloxUsername} className="text-[10px] font-mono text-foreground/80 truncate max-w-[140px]">
+                                          {acc.robloxUsername}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </TableCell>
+                          <TableCell>
                             <div className="flex flex-col gap-0.5">
                               <span className="font-mono text-xs text-muted-foreground">
                                 {key.expiresAt ? new Date(key.expiresAt).toLocaleDateString() : "LIFETIME"}
@@ -251,27 +317,56 @@ export default function KeysPage() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right px-6">
-                            {key.hwid && key.status === "active" && (
-                              <div className="flex items-center justify-end gap-1.5">
-                                {cooldownLeft ? (
-                                  <span className="text-[9px] font-mono text-muted-foreground uppercase">cooldown: {cooldownLeft}</span>
-                                ) : (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 text-[10px] font-mono uppercase border-border hover:border-primary hover:text-primary rounded-none gap-1"
-                                    onClick={() => hwidResetMutation.mutate(key.id)}
-                                    disabled={hwidResetMutation.isPending}
-                                  >
-                                    <RotateCcw className="w-3 h-3" />
-                                    Reset HWID
-                                  </Button>
-                                )}
-                                {resetCount > 0 && (
-                                  <span className="text-[9px] font-mono text-muted-foreground">({resetCount}x)</span>
-                                )}
-                              </div>
-                            )}
+                            <div className="flex flex-col items-end gap-1.5">
+                              {key.hwid && key.status === "active" && (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {cooldownLeft ? (
+                                    <span className="text-[9px] font-mono text-muted-foreground uppercase">cooldown: {cooldownLeft}</span>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-[10px] font-mono uppercase border-border hover:border-primary hover:text-primary rounded-none gap-1"
+                                      onClick={() => hwidResetMutation.mutate(key.id)}
+                                      disabled={hwidResetMutation.isPending}
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                      Reset HWID
+                                    </Button>
+                                  )}
+                                  {resetCount > 0 && (
+                                    <span className="text-[9px] font-mono text-muted-foreground">({resetCount}x)</span>
+                                  )}
+                                </div>
+                              )}
+                              {(() => {
+                                const linked = (key as any).linkedRobloxAccounts ?? [];
+                                if (linked.length === 0 || key.status !== "active") return null;
+                                const robloxCooldownLeft = formatCooldown((key as any).robloxLastResetAt, (key as any).keyRobloxResetCooldownHours ?? 168);
+                                const robloxResetCount = (key as any).robloxResetCount ?? 0;
+                                return (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {robloxCooldownLeft ? (
+                                      <span className="text-[9px] font-mono text-muted-foreground uppercase">cooldown: {robloxCooldownLeft}</span>
+                                    ) : (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-[10px] font-mono uppercase border-border hover:border-orange-500 hover:text-orange-500 rounded-none gap-1"
+                                        onClick={() => robloxResetMutation.mutate(key.id)}
+                                        disabled={robloxResetMutation.isPending}
+                                      >
+                                        <RotateCcw className="w-3 h-3" />
+                                        Reset Slot Roblox
+                                      </Button>
+                                    )}
+                                    {robloxResetCount > 0 && (
+                                      <span className="text-[9px] font-mono text-muted-foreground">({robloxResetCount}x)</span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
