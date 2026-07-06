@@ -5,13 +5,15 @@ import { eq } from "drizzle-orm";
 
 const router = Router();
 
-function formatGame(game: typeof gamesTable.$inferSelect) {
+export function formatGame(game: typeof gamesTable.$inferSelect) {
   return {
     id: game.id,
     slug: game.slug,
     name: game.name,
     description: game.description,
     imageUrl: game.imageUrl,
+    loaderName: game.loaderName ?? null,
+    features: (game.features as string[] | null) ?? [],
     status: game.status,
     createdAt: game.createdAt.toISOString(),
   };

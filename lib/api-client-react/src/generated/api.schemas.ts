@@ -35,6 +35,10 @@ export interface Game {
   description?: string | null;
   /** @nullable */
   imageUrl?: string | null;
+  /** @nullable */
+  loaderName?: string | null;
+  /** @nullable */
+  features?: string[] | null;
   status: string;
   createdAt: string;
 }

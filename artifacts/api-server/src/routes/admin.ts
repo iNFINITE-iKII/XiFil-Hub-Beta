@@ -316,4 +316,60 @@ router.put("/settings", requireAdmin, async (req, res): Promise<void> => {
   res.json(updated);
 });
 
+// PATCH /api/admin/games/:id — edit game settings (name, slug, imageUrl, loaderName, description, features, status)
+router.patch("/games/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const { name, slug, description, imageUrl, loaderName, features, status } = req.body as {
+    name?: string; slug?: string; description?: string; imageUrl?: string;
+    loaderName?: string; features?: string[]; status?: string;
+  };
+
+  const patch: Record<string, unknown> = {};
+
+  if (name !== undefined) {
+    const trimmed = String(name).trim().slice(0, 100);
+    if (!trimmed) { res.status(400).json({ error: "Name cannot be empty" }); return; }
+    patch.name = trimmed;
+  }
+  if (slug !== undefined) {
+    const cleaned = String(slug).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 60);
+    if (!cleaned) { res.status(400).json({ error: "Slug cannot be empty" }); return; }
+    // Check for duplicate slug (excluding current game)
+    const [existing] = await db.select({ id: gamesTable.id }).from(gamesTable).where(eq(gamesTable.slug, cleaned));
+    if (existing && existing.id !== id) { res.status(409).json({ error: "Slug already in use by another game" }); return; }
+    patch.slug = cleaned;
+  }
+  if (description !== undefined) patch.description = description ? String(description).slice(0, 2000) : null;
+  if (imageUrl !== undefined) patch.imageUrl = imageUrl ? String(imageUrl).slice(0, 500) : null;
+  if (loaderName !== undefined) patch.loaderName = loaderName ? String(loaderName).slice(0, 100) : null;
+  if (features !== undefined) {
+    patch.features = Array.isArray(features)
+      ? features.slice(0, 30).map(f => String(f).slice(0, 300)).filter(Boolean)
+      : null;
+  }
+  if (status !== undefined) {
+    if (!["active", "inactive"].includes(status)) { res.status(400).json({ error: "Invalid status" }); return; }
+    patch.status = status;
+  }
+
+  if (Object.keys(patch).length === 0) { res.status(400).json({ error: "No fields provided" }); return; }
+
+  const [updated] = await db.update(gamesTable).set(patch).where(eq(gamesTable.id, id)).returning();
+  if (!updated) { res.status(404).json({ error: "Game not found" }); return; }
+
+  res.json({
+    id: updated.id,
+    slug: updated.slug,
+    name: updated.name,
+    description: updated.description,
+    imageUrl: updated.imageUrl,
+    loaderName: updated.loaderName ?? null,
+    features: (updated.features as string[] | null) ?? [],
+    status: updated.status,
+    createdAt: updated.createdAt.toISOString(),
+  });
+});
+
 export default router;

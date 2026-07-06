@@ -368,6 +368,13 @@ components:
           type: ["string", "null"]
         imageUrl:
           type: ["string", "null"]
+        loaderName:
+          type: ["string", "null"]
+        features:
+          type: array
+          items:
+            type: string
+          nullable: true
         status:
           type: string
         createdAt:
