@@ -202,22 +202,23 @@ local function startFarmLoop()
             else Services.RunService.Heartbeat:Wait() end
 
         -- ──────────────── PRIORITAS 2: EGG (max 50 stud — lebih dari itu SKIP) ────────────────
-        -- Hanya dianggap target valid kalau egg Active==true dan Broken~=true
-        -- (lihat LocalDragonEgg: attack percuma kalau belum Active, dan begitu
-        -- Broken jadi true modelnya baru benar-benar hilang ±2 detik kemudian).
+        -- [FIX] Active TIDAK dipakai sebagai syarat masuk — Active baru jadi true
+        -- SETELAH proximity di-fire (fase approach kita sendiri yang memicunya),
+        -- jadi kalau disyaratkan di gate ini akan deadlock: bot tidak mau approach
+        -- karena belum Active, padahal Active tidak akan pernah true kalau tidak
+        -- di-approach. Broken tetap dicek karena itu sinyal akhir (egg sudah pecah).
         elseif EngineConfig.FarmTargetEgg and (function()
             local egg=GetActiveDragonEgg()
             local ep=egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
-            local active = egg and egg:GetAttribute("Active")
             local broken = egg and egg:GetAttribute("Broken")
-            return ep and active and not broken and (ep.Position-myHRP.Position).Magnitude<=500
+            return ep and not broken and (ep.Position-myHRP.Position).Magnitude<=500
         end)() then
             noTargetTimer=0; EngineConfig.IsLockDelay=false
             local egg=GetActiveDragonEgg()
             local eggPart = egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
-            -- Reset jika egg hilang, jadi tidak aktif, atau sudah pecah
+            -- Reset jika egg hilang atau sudah pecah
             -- (Broken dicek langsung, tidak nunggu part-nya hilang ±2 detik).
-            if not eggPart or not egg:GetAttribute("Active") or egg:GetAttribute("Broken") then
+            if not eggPart or egg:GetAttribute("Broken") then
                 _G._eggApproached=nil
                 eggPart=nil
             end
@@ -233,7 +234,7 @@ local function startFarmLoop()
                     local elapsed = 0
                     while elapsed < 1 do
                         if not EngineConfig.AutoFarmActive then break end
-                        if egg:GetAttribute("Broken") or not egg:GetAttribute("Active") then break end
+                        if egg:GetAttribute("Broken") then break end
                         -- Kirim proximity prompt
                         pcall(function()
                             for _,obj in ipairs(egg:GetDescendants()) do
