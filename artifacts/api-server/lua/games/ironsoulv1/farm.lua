@@ -285,20 +285,13 @@ local function startFarmLoop()
                     end)
                     _G._endlessTowerDone = true  -- sudah CFrame sekali; jangan ulang
 
-                    -- [ENDLESS TOWER] Setelah CFrame sekali ke portal spawn, tunggu di sana
-                    -- sambil bob naik-turun 20 stud (bukan diam total) sampai monster
-                    -- muncul atau farm dimatikan — tanpa re-teleport berulang.
+                    -- [ENDLESS TOWER] Setelah CFrame sekali ke portal spawn, diam total
+                    -- (tidak ada gerakan/bob) di posisi itu sampai monster muncul atau
+                    -- farm dimatikan — tidak re-teleport berulang.
                     if fxCFrame then
-                        local goingUp=true
                         while anyFarmToggleActive()
                               and #CombatEngine.GetValidMonsters()==0 do
-                            local bobChar=LocalPlayer.Character
-                            local bobHRP=bobChar and bobChar:FindFirstChild("HumanoidRootPart")
-                            if not bobHRP then break end
-                            local bobY=goingUp and 20 or 0
-                            ApplyMovement(bobHRP, fxCFrame + Vector3.new(0,bobY,0))
-                            goingUp=not goingUp
-                            task.wait(math.max(EngineConfig.CFrameDelay,0.5))
+                            task.wait(0.2)
                         end
                     end
                 end
