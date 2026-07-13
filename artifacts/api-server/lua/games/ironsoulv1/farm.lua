@@ -22,6 +22,31 @@ local ApplyMovement         = H.ApplyMovement
 local WORLD_INDEX           = H.WORLD_INDEX
 local ROOM_WORLD_KEY        = H.ROOM_WORLD_KEY
 
+-- [EGG] Cari instance "DragonEgg" yang BENAR di Workspace.
+-- Server kadang membuat DragonEgg baru (placeholder, belum ada EggModel/Part)
+-- SEBELUM DragonEgg lama selesai dihapus setelah proximity/broken → sesaat ada
+-- 2 instance bernama sama. FindFirstChild("DragonEgg") tidak bisa diandalkan
+-- karena bisa mengembalikan placeholder kosong itu. Jadi kita scan semua anak
+-- bernama "DragonEgg" dan ambil yang benar-benar punya EggModel.Part.
+local function GetActiveDragonEgg()
+    local best = nil
+    for _,child in ipairs(Workspace:GetChildren()) do
+        if child.Name=="DragonEgg" then
+            local eggModel = child:FindFirstChild("EggModel")
+            local part = eggModel and eggModel:FindFirstChild("Part")
+            if part then
+                -- Prioritaskan yang Active & belum Broken; kalau tidak ada,
+                -- tetap simpan kandidat pertama yang punya Part sebagai fallback.
+                if child:GetAttribute("Active") and not child:GetAttribute("Broken") then
+                    return child
+                end
+                best = best or child
+            end
+        end
+    end
+    return best
+end
+
 -- [S08] FARM LOOP
 -- Satu loop terpadu menangani semua prioritas: Chest > Egg > Enemy.
 -- Guard _farmLoopRunning mencegah instance ganda saat toggle dinyalakan ulang.
@@ -181,14 +206,14 @@ local function startFarmLoop()
         -- (lihat LocalDragonEgg: attack percuma kalau belum Active, dan begitu
         -- Broken jadi true modelnya baru benar-benar hilang ±2 detik kemudian).
         elseif EngineConfig.FarmTargetEgg and (function()
-            local egg=Workspace:FindFirstChild("DragonEgg")
+            local egg=GetActiveDragonEgg()
             local ep=egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
             local active = egg and egg:GetAttribute("Active")
             local broken = egg and egg:GetAttribute("Broken")
             return ep and active and not broken and (ep.Position-myHRP.Position).Magnitude<=500
         end)() then
             noTargetTimer=0; EngineConfig.IsLockDelay=false
-            local egg=Workspace:FindFirstChild("DragonEgg")
+            local egg=GetActiveDragonEgg()
             local eggPart = egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
             -- Reset jika egg hilang, jadi tidak aktif, atau sudah pecah
             -- (Broken dicek langsung, tidak nunggu part-nya hilang ±2 detik).
@@ -388,7 +413,7 @@ task.spawn(function()
             if not hasActiveTarget and EngineConfig.FarmTargetEgg then
                 local char=LocalPlayer.Character
                 local hrp=char and char:FindFirstChild("HumanoidRootPart")
-                local egg=Workspace:FindFirstChild("DragonEgg")
+                local egg=GetActiveDragonEgg()
                 local ep=egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
                 if hrp and ep and (ep.Position-hrp.Position).Magnitude<=500 then
                     hasActiveTarget=true
