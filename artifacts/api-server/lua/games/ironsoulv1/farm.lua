@@ -27,11 +27,15 @@ local ROOM_WORLD_KEY        = H.ROOM_WORLD_KEY
 -- Guard _farmLoopRunning mencegah instance ganda saat toggle dinyalakan ulang.
 --------------------------------------------------------------------------------
 
+-- Flag: true saat weapon switch sedang berjalan → tahan auto attack
+local _autoAttackPaused = false
+
 -- Loop: Auto Attack Only (fire remote saja, tanpa movement)
+-- Dibatasi 1x setiap 0.8 detik; berhenti selama jendela weapon switch.
 task.spawn(function()
     while true do
-        task.wait(math.max(EngineConfig.CFrameDelay,0.05))
-        if EngineConfig.AutoAttackOnly then
+        task.wait(0.8)  -- 1 serangan per 0.8 detik
+        if EngineConfig.AutoAttackOnly and not _autoAttackPaused then
             local char=LocalPlayer.Character
             local hrp=char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
@@ -45,6 +49,11 @@ end)
 
 -- Guard: cegah loop dobel
 local _farmLoopRunning=false
+
+-- Timer serangan farm: pisahkan interval attack dari interval movement
+-- Satu konstanta dipakai semua titik (Chest / Egg / Monster)
+local _lastFarmAttack   = 0
+local FARM_ATTACK_INTERVAL = 0.8  -- detik minimum antar BaseAttack di farm loop
 
 -- Cek apakah loop masih harus berjalan
 local function anyFarmToggleActive()
@@ -75,6 +84,10 @@ local function startFarmLoop()
     -- SETELAH ada monster World3 yang dibunuh, bukan dari awal loop kosong.
     _G._world3OrbitDone    = true
     _G._world3LastMonsterPos = nil   -- posisi monster terakhir yang dilawan di World3
+
+    -- [ENDLESS TOWER] State per-session
+    _G._endlessTowerNextCFrameAt = 0      -- tick() kapan CFrame berikutnya boleh jalan
+    _G._endlessTowerHadTarget    = false  -- flag: target baru saja habis
 
     while anyFarmToggleActive() do
         if checkVictoryUi() then DisableAutoFarm("Victory UI Found"); break end
@@ -109,7 +122,7 @@ local function startFarmLoop()
             local chestRoot = nearestChest and nearestChest.Root
             local chestObj  = nearestChest and nearestChest.Object
             if chestRoot and chestRoot:IsA("BasePart") then
-                myHum.PlatformStand=true
+                if not _autoAttackPaused then myHum.PlatformStand=true end
 
                 -- Cek per-model: chest BARU = butuh approach phase.
                 -- FIX: bandingkan dengan Object (model induk), bukan Root (Part anak)
@@ -147,9 +160,14 @@ local function startFarmLoop()
                 if EngineConfig.AutoFarmActive then
                     local targetCF=GetPositionCFrame(chestRoot.Position,EngineConfig.FarmPosition)
                     ApplyMovement(myHRP,targetCF)
-                    local atkCF=chestRoot.CFrame
-                    for _=1,EngineConfig.HitMultiplier do
-                        task.defer(function() pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,atkCF) end) end)
+                    -- Attack dibatasi 1x per FARM_ATTACK_INTERVAL, movement tetap jalan tiap CFrameDelay
+                    local now=tick()
+                    if now-_lastFarmAttack >= FARM_ATTACK_INTERVAL and not _autoAttackPaused then
+                        _lastFarmAttack=now
+                        local atkCF=chestRoot.CFrame
+                        for _=1,EngineConfig.HitMultiplier do
+                            task.defer(function() pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,atkCF) end) end)
+                        end
                     end
                     task.wait(EngineConfig.CFrameDelay)
                 else
@@ -169,7 +187,7 @@ local function startFarmLoop()
             -- Reset jika egg hilang (bisa karena diambil player lain)
             if not eggPart then _G._eggApproached=nil end
             if eggPart then
-                myHum.PlatformStand=true
+                if not _autoAttackPaused then myHum.PlatformStand=true end
 
                 -- Cek per-referensi: egg BERBEDA = pendekatan baru (fix bug multi-egg)
                 if _G._eggApproached ~= eggPart then
@@ -205,30 +223,82 @@ local function startFarmLoop()
             noTargetTimer=0; EngineConfig.IsLockDelay=false
             -- Tandai: ada monster di World3 → orbit akan dipicu saat monster habis
             if worldIdx==3 then _G._world3OrbitDone=false end
-            myHum.PlatformStand=true
+            if not _autoAttackPaused then myHum.PlatformStand=true end
             local monsters=CombatEngine.GetValidMonsters()
             local target=monsters[1]
             local tPart=target and (target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart)
             local tHum=target and target:FindFirstChildOfClass("Humanoid")
             if tPart and (not tHum or tHum.Health>0) then
-                -- Simpan posisi monster terakhir di World3 sebagai pusat orbit post-wave
+                -- Simpan posisi monster terakhir (World3) & tandai ada target (Endless Tower)
                 if worldIdx==3 then _G._world3LastMonsterPos = tPart.Position end
+                if worldIdx==4 then _G._endlessTowerHadTarget = true end
                 local isBoss=CombatEngine.GetLevelType(target)=="boss"
                 local savedH=EngineConfig.StandHeight
                 if isBoss then EngineConfig.StandHeight=EngineConfig.BossHeight end
                 local targetCF=GetPositionCFrame(tPart.Position,EngineConfig.FarmPosition)
                 EngineConfig.StandHeight=savedH
                 ApplyMovement(myHRP,targetCF)
-                for _=1,EngineConfig.HitMultiplier do
-                    task.defer(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,tPart.CFrame) end)
+                -- Attack dibatasi 1x per FARM_ATTACK_INTERVAL, movement tetap jalan tiap CFrameDelay
+                local now=tick()
+                if now-_lastFarmAttack >= FARM_ATTACK_INTERVAL and not _autoAttackPaused then
+                    _lastFarmAttack=now
+                    local atkCF=tPart.CFrame
+                    for _=1,EngineConfig.HitMultiplier do
+                        task.defer(function() pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,atkCF) end) end)
+                    end
                 end
                 task.wait(EngineConfig.CFrameDelay)
             else Services.RunService.Heartbeat:Wait() end
 
         -- ──────────────── TIDAK ADA TARGET → AUTO FIND ────────────────
         else
-            myHum.PlatformStand=false
+            -- [FIX] Tetap PlatformStand=true tepat saat target hilang, sama
+            -- seperti fase Chest/Egg/Monster di atas — supaya karakter
+            -- langsung "melayang" di posisi terakhir (gravity efektif
+            -- di-nolkan lewat ResetPhysics setiap tick) dan tidak sempat
+            -- jatuh ke tanah sebelum Auto Find / orbit World3 mengambil alih.
+            if not _autoAttackPaused then myHum.PlatformStand=true end
             CombatEngine.ResetPhysics(myHRP)
+
+            -- [ENDLESS TOWER] CFrame ke portal, jeda 3 detik antar CFrame.
+            -- Jika baru habis target → tunggu 2 detik dulu sebelum CFrame pertama.
+            if worldIdx==4 then
+                if _G._endlessTowerHadTarget then
+                    -- Target baru saja habis: set delay 2 detik
+                    _G._endlessTowerHadTarget    = false
+                    _G._endlessTowerNextCFrameAt = tick() + 2
+                end
+                if tick() >= (_G._endlessTowerNextCFrameAt or 0) then
+                    local fxCFrame
+                    pcall(function()
+                        local fxPart = Workspace.World.Start.Portal.EnemySpawnPortal.FX_SlowAOE
+                        CombatEngine.ResetPhysics(myHRP)
+                        myHRP.CFrame = fxPart.CFrame
+                        fxCFrame = fxPart.CFrame
+                    end)
+                    _G._endlessTowerNextCFrameAt = tick() + 3  -- CFrame berikutnya 3 detik lagi
+
+                    -- [ENDLESS TOWER] Belum ada monster setelah CFrame ke portal spawn →
+                    -- bob naik-turun 20 stud (bukan diam) supaya area sekitar portal
+                    -- ter-scan/ter-trigger sampai monster muncul, atau sampai jendela
+                    -- 3 detik ini habis (giliran CFrame-ke-portal berikutnya mengambil alih).
+                    if fxCFrame and #CombatEngine.GetValidMonsters()==0 then
+                        local bobStart=tick()
+                        local goingUp=true
+                        while tick()-bobStart<3
+                              and anyFarmToggleActive()
+                              and #CombatEngine.GetValidMonsters()==0 do
+                            local bobChar=LocalPlayer.Character
+                            local bobHRP=bobChar and bobChar:FindFirstChild("HumanoidRootPart")
+                            if not bobHRP then break end
+                            local bobY=goingUp and 20 or 0
+                            ApplyMovement(bobHRP, fxCFrame + Vector3.new(0,bobY,0))
+                            goingUp=not goingUp
+                            task.wait(math.max(EngineConfig.CFrameDelay,0.5))
+                        end
+                    end
+                end
+            end
 
             -- [WORLD3] Orbit 1x cepat sesaat setelah monster habis.
             -- Orbit mengelilingi posisi monster terakhir (statis) agar tidak
@@ -274,7 +344,8 @@ local function startFarmLoop()
     pcall(function()
         local char=LocalPlayer.Character
         local myHum=char and char:FindFirstChildOfClass("Humanoid")
-        if myHum then myHum.PlatformStand=false end
+        -- Jangan reset PlatformStand jika Fly masih aktif
+        if myHum and not EngineConfig.FlyActive then myHum.PlatformStand=false end
         EngineConfig.IsLockDelay=false
     end)
     _G._eggApproached=nil    -- reset agar egg berikutnya di-approach ulang
@@ -319,9 +390,10 @@ task.spawn(function()
 
             if hasActiveTarget then
                 local skills={}
-                if EngineConfig.SkillActive1 then table.insert(skills,"Skill1") end
-                if EngineConfig.SkillActive2 then table.insert(skills,"Skill2") end
-                if EngineConfig.SkillActiveU then table.insert(skills,"SkillU") end
+                if EngineConfig.SkillActive1  then table.insert(skills,"Skill1")  end
+                if EngineConfig.SkillActive2  then table.insert(skills,"Skill2")  end
+                if EngineConfig.SkillActiveU  then table.insert(skills,"SkillU")  end
+                if EngineConfig.SkillActiveAW then table.insert(skills,"SkillAW") end
                 for _,skillName in ipairs(skills) do
                     for combo=1,3 do
                         pcall(function() PlayerActionRE:FireServer("SkillAction",skillName,combo) end)
@@ -337,16 +409,21 @@ task.spawn(function()
 end)
 
 -- Loop: Weapon Switcher
+-- Pause auto attack selama 1 detik saat switch agar tidak tabrakan.
 task.spawn(function()
     while true do
         if EngineConfig.AutoWeaponSwitchActive then
-            -- Sementara lepas PlatformStand agar server menerima weapon switch
+            -- Tahan auto attack dulu
+            _autoAttackPaused = true
+            -- Lepas PlatformStand agar server menerima weapon switch
             local char=LocalPlayer.Character
             local hum=char and char:FindFirstChildOfClass("Humanoid")
             if hum then hum.PlatformStand=false end
             task.wait(0.05)
             pcall(function() EquipmentRE:FireServer("ChangeWeaponSlot") end)
-            task.wait(0.1)
+            -- Jendela 1 detik: auto attack berhenti, beri waktu switch selesai
+            task.wait(1)
+            _autoAttackPaused = false
             -- Farm loop akan kembalikan PlatformStand=true otomatis di iterasi berikutnya
             task.wait(3)
         else task.wait(0.5) end
@@ -447,6 +524,159 @@ task.spawn(function()
                     end
                 end
             end
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+
+-- [S09-FLY] BACKGROUND LOOP: Fly  (Infinite Yield style)
+-- BodyVelocity + BodyGyro → hover stabil, gravity sepenuhnya dinetralisir.
+-- Mobile: joystick bawaan Roblox (horizontal) + virtual joystick kanan (vertikal).
+-- PC    : WASD horizontal · Space naik · Ctrl/Shift turun.
+--------------------------------------------------------------------------------
+local _UIS = Services.UserInputService
+
+--------------------------------------------------------------------------------
+-- Helper: hancurkan BodyMover yang tertinggal di HRP
+local function _destroyFlyObjects(hrp)
+    if not hrp then return end
+    local bv = hrp:FindFirstChild("_XiFilFlyBV")
+    local bg = hrp:FindFirstChild("_XiFilFlyBG")
+    if bv then bv:Destroy() end
+    if bg then bg:Destroy() end
+end
+
+-- Helper: kembalikan CanCollide semua part karakter ke true
+local function _restoreCollision(char)
+    if not char then return end
+    for _, p in pairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = true end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- LOOP UTAMA FLY
+--------------------------------------------------------------------------------
+task.spawn(function()
+    local _flyBV   = nil
+    local _flyBG   = nil
+    local _prevHRP = nil
+    local _prevFly = false
+
+    while true do
+        Services.RunService.Heartbeat:Wait()
+
+        if EngineConfig.FlyActive then
+            local char = LocalPlayer.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+
+            if hrp and hum then
+                -- ── Setup awal / setelah respawn ──────────────────────────
+                if not _prevFly or hrp ~= _prevHRP then
+                    if _prevHRP and _prevHRP ~= hrp then
+                        _destroyFlyObjects(_prevHRP)
+                    end
+                    _prevFly = true
+                    _prevHRP = hrp
+
+                    hum.PlatformStand = true
+
+                    _flyBV          = Instance.new("BodyVelocity")
+                    _flyBV.Name     = "_XiFilFlyBV"
+                    _flyBV.Velocity = Vector3.zero
+                    _flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+                    _flyBV.P        = 1e4
+                    _flyBV.Parent   = hrp
+
+                    _flyBG           = Instance.new("BodyGyro")
+                    _flyBG.Name      = "_XiFilFlyBG"
+                    _flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+                    _flyBG.P         = 1e4
+                    _flyBG.D         = 100
+                    _flyBG.CFrame    = hrp.CFrame
+                    _flyBG.Parent    = hrp
+
+                end
+
+                -- ── Baca input gerak (camera-relative 3D, persis Infinite Yield) ──
+                --
+                -- Cara IY: joystick/WASD dikali vektor PENUH kamera (termasuk Y).
+                -- → Miringkan kamera ke atas + dorong joystick maju = terbang naik.
+                -- → Miringkan kamera ke bawah + dorong joystick maju = terbang turun.
+                -- Tidak perlu joystick kedua; 1 joystick + rotasi kamera = 6 arah.
+                --
+                local cam  = Workspace.CurrentCamera
+                local move = Vector3.zero
+
+                if cam then
+                    local camCF = cam.CFrame
+
+                    -- Proyeksikan MoveDirection (flat world-space) ke sumbu kamera
+                    -- agar dapat skalar maju/mundur dan kiri/kanan.
+                    local flatLook  = Vector3.new(camCF.LookVector.X,  0, camCF.LookVector.Z)
+                    local flatRight = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z)
+                    local md = hum.MoveDirection   -- diisi Roblox dari joystick/WASD/gamepad
+
+                    local fwd   = flatLook.Magnitude  > 0.01
+                                  and md:Dot(flatLook.Unit)  or 0
+                    local right = flatRight.Magnitude > 0.01
+                                  and md:Dot(flatRight.Unit) or 0
+
+                    -- Kalikan dengan vektor kamera PENUH (Y ikut → gerak 3D sejati)
+                    move = camCF.LookVector * fwd + camCF.RightVector * right
+                end
+
+                -- Vertikal eksplisit: Space/Jump naik · Ctrl/Shift turun (PC & gamepad)
+                -- Mobile: miringkan kamera ke atas/bawah + dorong joystick = naik/turun
+                local vy = 0
+                if _UIS:IsKeyDown(Enum.KeyCode.Space)
+                or _UIS:IsKeyDown(Enum.KeyCode.ButtonA)
+                   then vy = 1 end
+                if _UIS:IsKeyDown(Enum.KeyCode.LeftControl)
+                or _UIS:IsKeyDown(Enum.KeyCode.LeftShift)
+                or _UIS:IsKeyDown(Enum.KeyCode.DPadDown)
+                   then vy = -1 end
+                move = move + Vector3.new(0, vy, 0)
+
+                -- ── Terapkan velocity ─────────────────────────────────────
+                local speed = math.max(EngineConfig.FlySpeed or 50, 1)
+                if _flyBV and _flyBV.Parent then
+                    _flyBV.Velocity = if move.Magnitude > 0
+                        then move.Unit * speed
+                        else Vector3.zero
+                end
+
+                -- ── Gyro: hadap arah kamera, karakter tegak ───────────────
+                local cam = Workspace.CurrentCamera
+                if _flyBG and _flyBG.Parent and cam then
+                    local flatLook = Vector3.new(
+                        cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z)
+                    if flatLook.Magnitude > 0.01 then
+                        _flyBG.CFrame = CFrame.new(Vector3.zero, flatLook)
+                    end
+                end
+
+                -- ── Noclip ───────────────────────────────────────────────
+                for _, p in pairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = false end
+                end
+            end
+
+        elseif _prevFly then
+            -- ── Cleanup saat fly dimatikan ────────────────────────────────
+            _prevFly = false
+            _destroyFlyObjects(_prevHRP)
+            _flyBV, _flyBG = nil, nil
+
+            local char = _prevHRP and _prevHRP.Parent
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and not EngineConfig.AutoFarmActive then
+                hum.PlatformStand = false
+            end
+            _restoreCollision(char)
+            _prevHRP = nil
         end
     end
 end)
