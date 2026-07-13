@@ -86,8 +86,9 @@ local function startFarmLoop()
     _G._world3LastMonsterPos = nil   -- posisi monster terakhir yang dilawan di World3
 
     -- [ENDLESS TOWER] State per-session
-    _G._endlessTowerNextCFrameAt = 0      -- tick() kapan CFrame berikutnya boleh jalan
-    _G._endlessTowerHadTarget    = false  -- flag: target baru saja habis
+    _G._endlessTowerWaitUntil = 0      -- tick() kapan CFrame pertama boleh jalan (delay 2s setelah target habis)
+    _G._endlessTowerDone      = false  -- one-shot: true setelah CFrame dilakukan, sampai target baru muncul & habis lagi
+    _G._endlessTowerHadTarget = false  -- flag: target baru saja habis
 
     while anyFarmToggleActive() do
         if checkVictoryUi() then DisableAutoFarm("Victory UI Found"); break end
@@ -231,7 +232,10 @@ local function startFarmLoop()
             if tPart and (not tHum or tHum.Health>0) then
                 -- Simpan posisi monster terakhir (World3) & tandai ada target (Endless Tower)
                 if worldIdx==3 then _G._world3LastMonsterPos = tPart.Position end
-                if worldIdx==4 then _G._endlessTowerHadTarget = true end
+                if worldIdx==4 then
+                    _G._endlessTowerHadTarget = true
+                    _G._endlessTowerDone      = false  -- target baru aktif → izinkan CFrame sekali lagi saat habis nanti
+                end
                 local isBoss=CombatEngine.GetLevelType(target)=="boss"
                 local savedH=EngineConfig.StandHeight
                 if isBoss then EngineConfig.StandHeight=EngineConfig.BossHeight end
@@ -264,11 +268,14 @@ local function startFarmLoop()
             -- Jika baru habis target → tunggu 2 detik dulu sebelum CFrame pertama.
             if worldIdx==4 then
                 if _G._endlessTowerHadTarget then
-                    -- Target baru saja habis: set delay 2 detik
-                    _G._endlessTowerHadTarget    = false
-                    _G._endlessTowerNextCFrameAt = tick() + 2
+                    -- Target baru saja habis: set delay 2 detik sebelum CFrame pertama
+                    _G._endlessTowerHadTarget = false
+                    _G._endlessTowerWaitUntil = tick() + 2
                 end
-                if tick() >= (_G._endlessTowerNextCFrameAt or 0) then
+                -- One-shot: hanya CFrame sekali per sesi "tidak ada target".
+                -- Tidak akan CFrame lagi sampai target baru muncul & habis lagi
+                -- (flag _endlessTowerDone direset di blok MONSTER di atas).
+                if not _G._endlessTowerDone and tick() >= (_G._endlessTowerWaitUntil or 0) then
                     local fxCFrame
                     pcall(function()
                         local fxPart = Workspace.World.Start.Portal.EnemySpawnPortal.FX_SlowAOE
@@ -276,17 +283,14 @@ local function startFarmLoop()
                         myHRP.CFrame = fxPart.CFrame
                         fxCFrame = fxPart.CFrame
                     end)
-                    _G._endlessTowerNextCFrameAt = tick() + 3  -- CFrame berikutnya 3 detik lagi
+                    _G._endlessTowerDone = true  -- sudah CFrame sekali; jangan ulang
 
-                    -- [ENDLESS TOWER] Belum ada monster setelah CFrame ke portal spawn →
-                    -- bob naik-turun 20 stud (bukan diam) supaya area sekitar portal
-                    -- ter-scan/ter-trigger sampai monster muncul, atau sampai jendela
-                    -- 3 detik ini habis (giliran CFrame-ke-portal berikutnya mengambil alih).
-                    if fxCFrame and #CombatEngine.GetValidMonsters()==0 then
-                        local bobStart=tick()
+                    -- [ENDLESS TOWER] Setelah CFrame sekali ke portal spawn, tunggu di sana
+                    -- sambil bob naik-turun 20 stud (bukan diam total) sampai monster
+                    -- muncul atau farm dimatikan — tanpa re-teleport berulang.
+                    if fxCFrame then
                         local goingUp=true
-                        while tick()-bobStart<3
-                              and anyFarmToggleActive()
+                        while anyFarmToggleActive()
                               and #CombatEngine.GetValidMonsters()==0 do
                             local bobChar=LocalPlayer.Character
                             local bobHRP=bobChar and bobChar:FindFirstChild("HumanoidRootPart")
