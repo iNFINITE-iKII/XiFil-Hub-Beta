@@ -47,6 +47,7 @@ function Navigation.GetSingleClosestPortal(portalName, myPosition, worldIdx)
     if not roundDoor then return nil end
 
     local closestPortalRoot = nil
+    local closestPortalInstance = nil
     local shortestDistance = math.huge
     local children = roundDoor:GetChildren()
 
@@ -76,11 +77,59 @@ function Navigation.GetSingleClosestPortal(portalName, myPosition, worldIdx)
                 if distance < shortestDistance then
                     shortestDistance = distance
                     closestPortalRoot = cf
+                    closestPortalInstance = obj
                 end
             end
         end
     end
-    return closestPortalRoot
+    -- Instance dikembalikan sebagai return kedua supaya caller (mis. World 3)
+    -- bisa memicu ProximityPrompt / mengecek gerbang ronde, bukan cuma
+    -- memindahkan CFrame lalu diam menunggu Touched yang mungkin tidak pernah fire.
+    return closestPortalRoot, closestPortalInstance
+end
+
+-- [FIX] Beberapa portal (teramati di World 3 / Oathlost Castle) tidak
+-- memakai Touched biasa, melainkan child "E" berupa ProximityPrompt yang
+-- harus di-trigger manual — kalau cuma berdiri di CFrame-nya, tidak akan
+-- pernah kebuka. Selain itu portal dikunci per-attribute "RoundNum" vs
+-- "GameRoundCfg.GameRound"; kalau ronde belum sampai, menunggu di situ
+-- tidak ada gunanya sama sekali.
+-- Return: true kalau portal bisa/berhasil dicoba trigger, false kalau
+-- memang masih terkunci oleh gerbang ronde (supaya caller bisa langsung
+-- skip idle-wait daripada diam 115 detik sia-sia).
+function Navigation.TryTriggerPortal(portalInstance)
+    if not portalInstance then return true end
+
+    -- Gerbang ronde — samakan dengan CanOpen() di script server portal asli
+    local ok, roundNum = pcall(function() return portalInstance:GetAttribute("RoundNum") end)
+    if ok and roundNum then
+        local cfgFolder = Services.ReplicatedStorage:FindFirstChild("GameRoundCfg")
+        local gameRound = cfgFolder and cfgFolder:GetAttribute("GameRound")
+        if gameRound and roundNum >= gameRound then
+            return false -- masih terkunci, jangan buang waktu menunggu
+        end
+    end
+
+    -- Varian ProximityPrompt ("E") — perlu di-fire manual
+    local promptHolder = portalInstance:FindFirstChild("E")
+    local prompt = nil
+    if promptHolder then
+        if promptHolder:IsA("ProximityPrompt") then
+            prompt = promptHolder
+        else
+            prompt = promptHolder:FindFirstChildOfClass("ProximityPrompt")
+        end
+    end
+    if not prompt then
+        prompt = portalInstance:FindFirstChildOfClass("ProximityPrompt")
+    end
+
+    if prompt and typeof(fireproximityprompt) == "function" then
+        pcall(fireproximityprompt, prompt)
+    end
+    -- Kalau tidak ada ProximityPrompt sama sekali, berarti varian Touched —
+    -- sudah tertangani otomatis begitu myHRP.CFrame disamakan dengan portal.
+    return true
 end
 
 function Navigation.GetClosestObject(folderName, objectName, myPosition)
@@ -116,104 +165,68 @@ local function anyActiveTargetExists()
     return false
 end
 
--- ── World 1 (Starless Forest): orbit 3 tier 50/150/250, lalu cari portal, lalu idle ──
+-- ── World 1 (Starless Forest): hardcoded positions → CFrame berurutan → idle ──
+-- [HARDCODED POSITIONS] Mengatasi masalah StreamingEnabled — alih-alih mencari
+-- instance di workspace, bot CFrame langsung ke koordinat tetap yang sudah diketahui.
+-- 8 titik diiterasi berurutan. Indeks dikelola lewat _G._world1GroundIdx
+-- (direset ke 1 di awal setiap sesi farm). Setelah titik ke-8, counter kembali ke 1.
+--
+-- [AUTO-SKIP] Kalau di titik tersebut tidak ada monster (stall 2 detik), langsung
+-- lanjut ke titik berikutnya — terus maju sampai ketemu monster, farm dimatikan,
+-- atau world berubah. Max 30 lompatan per pemanggilan.
 function Navigation.SearchWorld1(myHRP, myHum)
-    -- [INSTANT CHECK] Jika saat dipanggil ternyata world sudah berubah, langsung batalkan!
     if WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then return end
 
+    EngineConfig.IsLockDelay = true
     myHum.PlatformStand = true
-    print("[SYSTEM W1] Room vacant! Searching fallback nodes...")
 
-    local door = Navigation.GetClosestObject("RoundDoor", "Door", myHRP.Position)
-    if door then
+    local function globalBreakCondition()
+        return not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1
+    end
+
+    local positions = {
+        Vector3.new(-660,  5,    -10),
+        Vector3.new(-461,  6,      3),
+        Vector3.new(-430,  5,    190),
+        Vector3.new(1117,  7,    -23),
+        Vector3.new(-650,  5,   -400),
+        Vector3.new(-470,  5,   -380),
+        Vector3.new(-445,  5,   -595),
+        Vector3.new(-2200, 41, -13200),
+        Vector3.new( 360,   7,   200),
+        Vector3.new( 380,   7,    25),
+        Vector3.new(-2420,  42,   -10),
+    }
+    local total = #positions
+
+    local idx = _G._world1GroundIdx or 1
+    if idx > total then idx = 1 end
+
+    while not globalBreakCondition() do
         CombatEngine.ResetPhysics(myHRP)
-        myHRP.CFrame = door:IsA("Model") and door:GetPivot() or door.CFrame
+        myHRP.CFrame = CFrame.new(positions[idx])
 
-        local interrupted = CombatEngine.InterruptableStall(0.5, function()
-            -- Interrupsi ditambahkan pengecekan SelectedWorld
-            return not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1
-        end)
-        if interrupted or anyActiveTargetExists() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then
-            myHum.PlatformStand = false; return
-        end
+        _G._world1GroundIdx = (idx % total) + 1
+        idx = _G._world1GroundIdx
+
+        if CombatEngine.InterruptableStall(0.001, globalBreakCondition) then break end
+        if anyActiveTargetExists() then break end
     end
 
-    local centerPosition = myHRP.Position
-    local steps = 50
-    local orbitTiers = {50, 150, 250}
-
-    for tierIndex, currentRadius in ipairs(orbitTiers) do
-        if anyActiveTargetExists() or not EngineConfig.AutoFarmActive or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then break end
-        print("[SYSTEM W1] Executing Orbit Tier " .. tierIndex .. " with Radius: " .. currentRadius)
-
-        local lastOrbitCFrame = nil
-        for i = 1, steps do
-            -- Interrupsi instan di dalam loop pergerakan derajat orbit
-            if not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then break end
-
-            local angle = (i / steps) * (math.pi * 2)
-            local targetPos = centerPosition + Vector3.new(math.cos(angle) * currentRadius, 0, math.sin(angle) * currentRadius)
-
-            CombatEngine.ResetPhysics(myHRP)
-            lastOrbitCFrame = CFrame.new(targetPos, centerPosition)
-            myHRP.CFrame = lastOrbitCFrame
-            Services.RunService.Heartbeat:Wait()
-        end
-
-        if lastOrbitCFrame then
-            local orbitStalled = CombatEngine.InterruptableStall(2, function()
-                if not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then return true end
-                CombatEngine.ResetPhysics(myHRP)
-                myHRP.CFrame = lastOrbitCFrame
-            end)
-            if orbitStalled or anyActiveTargetExists() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then break end
-        end
-    end
-
-    if anyActiveTargetExists() or not EngineConfig.AutoFarmActive or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then
-        myHum.PlatformStand = false; return
-    end
-
-    local finalCFrame = myHRP.CFrame
-    local isInterrupted = CombatEngine.InterruptableStall(5, function()
-        if not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then return true end
-        CombatEngine.ResetPhysics(myHRP)
-        myHRP.CFrame = finalCFrame
-    end)
-    if isInterrupted or anyActiveTargetExists() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then
-        myHum.PlatformStand = false; return
-    end
-
-    local portal = Navigation.GetClosestObject("RoundDoor", "Portal", myHRP.Position)
-        or Navigation.GetClosestObject("Workspace", "Portal", myHRP.Position)
-    if portal then
-        CombatEngine.ResetPhysics(myHRP)
-        myHRP.CFrame = portal:IsA("Model") and portal:GetPivot() or portal.CFrame
-
-        local portalCFrame = myHRP.CFrame
-        CombatEngine.InterruptableStall(3, function()
-            if not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then return true end
-            CombatEngine.ResetPhysics(myHRP)
-            myHRP.CFrame = portalCFrame
-        end)
-        if anyActiveTargetExists() or not EngineConfig.AutoFarmActive or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then
-            myHum.PlatformStand = false; return
-        end
-    end
-
-    -- Idle stall 115 detik menunggu respawn
-    if EngineConfig.AutoFarmActive and not anyActiveTargetExists() and WORLD_INDEX[EngineConfig.SelectedWorld] == 1 then
-        local idleCFrame = myHRP.CFrame
-        CombatEngine.InterruptableStall(115, function()
-            if not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 1 then return true end
-            CombatEngine.ResetPhysics(myHRP)
-            myHRP.CFrame = idleCFrame
-        end)
-    end
+    EngineConfig.IsLockDelay = false
     myHum.PlatformStand = false
 end
 
--- ── World 2 (Frozen Valley): stall → PortalD → Portal → idle ──
+-- ── World 2 (Frozen Valley): fire TouchInterest portal tiap Room berurutan ──
+-- [ROOM SEQUENTIAL] Iterasi semua subfolder workspace.World, tiap giliran:
+--   1. Cari workspace.World.<room>.Portal.Root
+--   2. CFrame ke Root
+--   3. firetouchinterest(myHRP, Root.TouchInterest, 0)
+-- Indeks dikelola lewat _G._world2RoomIdx (direset ke 1 di awal sesi farm).
+-- [HARDCODED POSITIONS] Mengatasi masalah StreamingEnabled — CFrame langsung ke
+-- koordinat tetap yang sudah diketahui, tanpa bergantung pada instance di workspace.
+-- 8 titik diiterasi berurutan. Indeks dikelola lewat _G._world2RoomIdx
+-- (direset ke 1 di awal setiap sesi farm). Setelah titik ke-8, counter kembali ke 1.
 function Navigation.SearchWorld2(myHRP, myHum)
     if WORLD_INDEX[EngineConfig.SelectedWorld] ~= 2 then return end
 
@@ -224,47 +237,44 @@ function Navigation.SearchWorld2(myHRP, myHum)
         return not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 2
     end
 
-    if CombatEngine.InterruptableStall(3, globalBreakCondition) then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
+    local positions = {
+        Vector3.new(-6165,   5,   641),
+        Vector3.new(-4348, 569,  1581),
+        Vector3.new(-4216, 560,  1583),
+        Vector3.new(-4040, 561,  1576),
+        Vector3.new(-6247,   3, -1432),
+        Vector3.new(-4100, 562,  2500),
+        Vector3.new(-4388, 564,  2515),
+        Vector3.new(-4188, 649, -1866),
+    }
+    local total = #positions
 
-    local portalDCF = Navigation.GetSingleClosestPortal("PortalD", myHRP.Position, 2)
-    if portalDCF and not globalBreakCondition() then
+    local idx = _G._world2RoomIdx or 1
+    if idx > total then idx = 1 end
+
+    while not globalBreakCondition() do
         CombatEngine.ResetPhysics(myHRP)
-        myHRP.CFrame = portalDCF
-        task.wait(0.1)
+        myHRP.CFrame = CFrame.new(positions[idx])
+
+        _G._world2RoomIdx = (idx % total) + 1
+        idx = _G._world2RoomIdx
+
+        if CombatEngine.InterruptableStall(0.001, globalBreakCondition) then break end
+        if anyActiveTargetExists() then break end
     end
-
-    if CombatEngine.InterruptableStall(3, globalBreakCondition) then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
-    if anyActiveTargetExists() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 2 then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
-
-    if CombatEngine.InterruptableStall(3, globalBreakCondition) then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
-
-    local portalCF = Navigation.GetSingleClosestPortal("Portal", myHRP.Position, 2)
-    if portalCF and not globalBreakCondition() then
-        CombatEngine.ResetPhysics(myHRP)
-        myHRP.CFrame = portalCF
-        task.wait(0.1)
-    end
-
-    if CombatEngine.InterruptableStall(3, globalBreakCondition) then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
 
     EngineConfig.IsLockDelay = false
-    if anyActiveTargetExists() or not EngineConfig.AutoFarmActive or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 2 then
-        myHum.PlatformStand = false; return
-    end
-
-    -- Idle stall 115 detik
-    if EngineConfig.AutoFarmActive and not anyActiveTargetExists() and WORLD_INDEX[EngineConfig.SelectedWorld] == 2 then
-        EngineConfig.IsLockDelay = true
-        CombatEngine.InterruptableStall(115, function()
-            if globalBreakCondition() then return true end
-            CombatEngine.ResetPhysics(myHRP)
-        end)
-        EngineConfig.IsLockDelay = false
-    end
     myHum.PlatformStand = false
 end
 
--- ── World 3 (Oathlost Castle): stall → Portal dinamis → idle ──
+-- ── World 3 (Oathlost Castle): hardcoded CFrame positions ──
+-- [HARDCODED POSITIONS] 6 titik koordinat tetap Oathlost Castle diiterasi
+-- berurutan. Indeks dikelola lewat _G._world3GroundIdx (direset ke 1 di awal
+-- setiap sesi farm — lihat startFarmLoop() di farm.lua).
+--
+-- [AUTO-SKIP] Kalau di titik tersebut tidak ada monster (stall 0.05 detik),
+-- langsung lanjut ke titik berikutnya — terus maju sampai ketemu monster,
+-- farm dimatikan, atau world berubah.
 function Navigation.SearchWorld3(myHRP, myHum)
     if WORLD_INDEX[EngineConfig.SelectedWorld] ~= 3 then return end
 
@@ -275,31 +285,32 @@ function Navigation.SearchWorld3(myHRP, myHum)
         return not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 3
     end
 
-    if CombatEngine.InterruptableStall(3, globalBreakCondition) then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
+    local positions = {
+        Vector3.new(  687,  67,  600),
+        Vector3.new(  125,  -8,  812),
+        Vector3.new(  236,  10,  287),
+        Vector3.new(  774,  64,  -34),
+        Vector3.new( -756,  43,  255),
+        Vector3.new( -448,  49,  262),
+        Vector3.new(-1002,  22,  259),
+    }
+    local total = #positions
 
-    local closestPortalCF = Navigation.GetSingleClosestPortal("Portal", myHRP.Position, 3)
-    if closestPortalCF and not globalBreakCondition() then
+    local idx = _G._world3GroundIdx or 1
+    if idx > total then idx = 1 end
+
+    while not globalBreakCondition() do
         CombatEngine.ResetPhysics(myHRP)
-        myHRP.CFrame = closestPortalCF
-        task.wait(0.1)
-    end
+        myHRP.CFrame = CFrame.new(positions[idx])
 
-    if CombatEngine.InterruptableStall(3, globalBreakCondition) then EngineConfig.IsLockDelay = false; myHum.PlatformStand = false; return end
+        _G._world3GroundIdx = (idx % total) + 1
+        idx = _G._world3GroundIdx
+
+        if CombatEngine.InterruptableStall(0.001, globalBreakCondition) then break end
+        if anyActiveTargetExists() then break end
+    end
 
     EngineConfig.IsLockDelay = false
-    if anyActiveTargetExists() or not EngineConfig.AutoFarmActive or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 3 then
-        myHum.PlatformStand = false; return
-    end
-
-    -- Idle stall 115 detik
-    if EngineConfig.AutoFarmActive and not anyActiveTargetExists() and WORLD_INDEX[EngineConfig.SelectedWorld] == 3 then
-        EngineConfig.IsLockDelay = true
-        CombatEngine.InterruptableStall(115, function()
-            if globalBreakCondition() then return true end
-            CombatEngine.ResetPhysics(myHRP)
-        end)
-        EngineConfig.IsLockDelay = false
-    end
     myHum.PlatformStand = false
 end
 

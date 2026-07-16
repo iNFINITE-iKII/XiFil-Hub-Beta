@@ -55,18 +55,69 @@ end
 -- Flag: true saat weapon switch sedang berjalan → tahan auto attack
 local _autoAttackPaused = false
 
+-- [WEAPON] Dispatcher serangan berdasarkan EngineConfig.SelectedWeapon.
+-- Heavy : fire BaseAttack combo-3 sebanyak 3x per kesempatan.
+-- Bow   : fire BaseAttack combo-6 (1x) + BulletShoot dengan target eksplisit.
+--         BulletShoot adalah remote yang mendaftarkan damage peluru bow di server.
+--         targetModel boleh nil (Kill Aura) → BulletShoot dilewati, fallback ke BaseAttack saja.
+
+local function FireHeavyAttack(targetCFrame)
+    for _ = 1, 1 do
+        pcall(function()
+            PlayerActionRE:FireServer("SkillAction", "BaseAttack", 3, targetCFrame)
+        end)
+    end
+end
+
+local function FireBowAttack(targetModel, targetCFrame)
+    -- Langkah 1: BaseAttack combo-6 — trigger animasi + combo bow di server
+    pcall(function()
+        PlayerActionRE:FireServer("SkillAction", "BaseAttack", 6, targetCFrame)
+    end)
+    -- Langkah 2: BulletShoot burst — 2x fire, tiap call bawa 2 Idx (4 peluru total)
+    -- Hanya dikirim jika ada targetModel; tanpa model server tidak tahu siapa kena.
+    if targetModel then
+        local args = {
+            {["Idx"] = 1, ["Enemy"] = targetModel},
+            {["Idx"] = 2, ["Enemy"] = targetModel},
+            {["Idx"] = 3, ["Enemy"] = targetModel},
+            {["Idx"] = 4, ["Enemy"] = targetModel},
+        }
+        for _ = 1, 4 do
+            pcall(function()
+                PlayerActionRE:FireServer(
+                    "BulletShoot",
+                    "SkywingBow_AtkSkywingBow_Atk_6",
+                    args
+                )
+            end)
+        end
+    end
+end
+
+-- Dispatcher utama — pakai di semua titik serangan.
+-- targetModel : Model instance target (monster/chest/egg), atau nil jika tidak ada.
+-- targetCFrame: CFrame posisi target untuk BaseAttack.
+local function FireWeaponAttack(targetModel, targetCFrame)
+    if EngineConfig.SelectedWeapon == "Bow" then
+        FireBowAttack(targetModel, targetCFrame)
+    else
+        FireHeavyAttack(targetCFrame)
+    end
+end
+
 -- Loop: Auto Attack Only (fire remote saja, tanpa movement)
 -- Dibatasi 1x setiap 0.8 detik; berhenti selama jendela weapon switch.
 task.spawn(function()
     while true do
-        task.wait(0.8)  -- 1 serangan per 0.8 detik
+        task.wait(0.5)  -- 1 serangan per 0.8 detik
         if EngineConfig.AutoAttackOnly and not _autoAttackPaused then
             local char=LocalPlayer.Character
             local hrp=char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                for _=1,EngineConfig.HitMultiplier do
-                    task.defer(function() pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,hrp.CFrame) end) end)
-                end
+                -- Kill Aura: tidak ada targetModel (tidak tahu monster mana) →
+                -- Bow hanya fire BaseAttack combo-6; BulletShoot dilewati.
+                task.defer(function() FireWeaponAttack(nil, hrp.CFrame) end)
             end
         end
     end
@@ -77,8 +128,9 @@ local _farmLoopRunning=false
 
 -- Timer serangan farm: pisahkan interval attack dari interval movement
 -- Satu konstanta dipakai semua titik (Chest / Egg / Monster)
-local _lastFarmAttack   = 0
-local FARM_ATTACK_INTERVAL = 0.8  -- detik minimum antar BaseAttack di farm loop
+local _lastFarmAttack      = 0
+local FARM_ATTACK_INTERVAL = 0.5   -- detik minimum antar attack untuk Heavy
+local BOW_ATTACK_INTERVAL  = 0.000000001   -- bow lebih cepat; masih aman dari rate-limit server
 
 -- Cek apakah loop masih harus berjalan
 local function anyFarmToggleActive()
@@ -104,16 +156,53 @@ local function startFarmLoop()
     if _farmLoopRunning then return end
     _farmLoopRunning=true
 
+    -- Nol-kan velocity setiap Heartbeat selama Auto Farm aktif
+    -- supaya gravity tidak narik karakter turun saat idle / CFrame / stall.
+    local _physicsConn = Services.RunService.Heartbeat:Connect(function()
+        if not EngineConfig.AutoFarmActive then return end
+        local c   = LocalPlayer.Character
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.AssemblyLinearVelocity  = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
+    end)
+
     local noTargetTimer=0
     -- [WORLD3 ORBIT] Mulai sebagai "sudah selesai" agar orbit hanya muncul
     -- SETELAH ada monster World3 yang dibunuh, bukan dari awal loop kosong.
     _G._world3OrbitDone    = true
     _G._world3LastMonsterPos = nil   -- posisi monster terakhir yang dilawan di World3
+    -- [WORLD3 RESPAWN] Counter round respawn berurutan (Round1, Round2, ...).
+    -- Naik 1 setiap kali SearchWorld3 dipanggil (tidak ada musuh setelah stall).
+    _G._world3GroundIdx = 1
+    -- [WORLD1 GROUND] Counter indeks Ground berurutan untuk World 1 (workspace.World.<subfolder>.Ground).
+    _G._world1GroundIdx = 1
+    -- [WORLD2 ROOM] Counter indeks Room berurutan untuk World 2 (workspace.World.<room>.Portal.Root.TouchInterest).
+    _G._world2RoomIdx = 1
+    -- [CHEST/EGG GUARD]
+    -- _worldHasMonster : true setelah GetValidMonsters() mengembalikan hasil non-empty (monster terdeteksi).
+    -- _eggSessionDone  : true setelah 1 egg dihancurkan; reset setelah karakter berhasil hit monster.
+    -- _eggWindowStart  : tick() saat monster terakhir di-hit; egg hanya boleh ditarget selama 7 detik sejak ini.
+    _G._worldHasFind    = false
+    _G._worldHasMonster = false
+    _G._eggSessionDone  = false
+    _G._eggWindowStart  = 0     -- 0 = belum pernah hit monster; egg terkunci sampai monster pertama di-hit
 
     -- [ENDLESS TOWER] State per-session
-    _G._endlessTowerWaitUntil = 0      -- tick() kapan CFrame pertama boleh jalan (delay 2s setelah target habis)
-    _G._endlessTowerDone      = false  -- one-shot: true setelah CFrame dilakukan, sampai target baru muncul & habis lagi
-    _G._endlessTowerHadTarget = false  -- flag: target baru saja habis
+    _G._endlessTowerWaitUntil    = 0     -- tick() kapan CFrame pertama boleh jalan (delay setelah target habis)
+    _G._endlessTowerDone         = false -- true setelah CFrame Portal; reset saat monster baru muncul
+    _G._endlessTowerHadTarget    = false -- flag: target baru saja habis
+    _G._endlessTowerFollowStartAt= 0     -- tick() saat Fase 1 dimulai
+    _G._endlessTowerFollowEndAt  = 0     -- tick() akhir Fase 1 (start + 4 detik)
+    _G._endlessTowerFreezePos    = nil   -- posisi freeze saat akhir detik ke-1
+    _G._endlessTowerFixedY       = nil   -- Y terkunci saat Fase 2 (X,Z tetap ikut monster, Y tidak berubah)
+    _G._endlessTowerPortalAt     = 0     -- tick() terakhir CFrame ke Portal (untuk retry setiap 7 detik)
+    _G._endlessTowerLastPos      = nil   -- posisi musuh terakhir saat mati (jadi pusat Y=35)
+    if _G._endlessTowerHoverConn then pcall(function() _G._endlessTowerHoverConn:Disconnect() end) end
+    _G._endlessTowerHoverConn    = nil   -- Heartbeat connection pengunci CFrame selama countdown
+    if _G._endlessTowerYLockConn then pcall(function() _G._endlessTowerYLockConn:Disconnect() end) end
+    _G._endlessTowerYLockConn    = nil   -- Heartbeat koreksi Y drift saat Fase 2
 
     while anyFarmToggleActive() do
         if checkVictoryUi() then DisableAutoFarm("Victory UI Found"); break end
@@ -129,53 +218,28 @@ local function startFarmLoop()
         if worldIdx==2 and EngineConfig.IsLockDelay and not anyActiveTargetExists() then
             CombatEngine.ResetPhysics(myHRP); Services.RunService.Heartbeat:Wait()
 
-        -- ──────────────── PRIORITAS 1: CHEST (max 50 stud — seperti Egg) ────────────────
-        elseif EngineConfig.FarmTargetChest and (function()
-            -- Hanya aktif jika ada chest yang jaraknya ≤ 500 stud dari player
-            for _,c in ipairs(CombatEngine.GetValidChests()) do
-                if c.Root and (c.Root.Position-myHRP.Position).Magnitude<=500 then return true end
-            end
-            return false
-        end)() then
+        -- ──────────────── PRIORITAS 1: CHEST ────────────────
+        elseif EngineConfig.FarmTargetChest and #CombatEngine.GetValidChests() > 0 then
             noTargetTimer=0; EngineConfig.IsLockDelay=false
-            -- Ambil chest terdekat yang masih ≤ 50 stud
-            local nearestChest
-            for _,c in ipairs(CombatEngine.GetValidChests()) do
-                if c.Root and (c.Root.Position-myHRP.Position).Magnitude<=500 then
-                    nearestChest=c; break
-                end
-            end
+            -- Ambil chest pertama yang tersedia (tanpa batasan jarak)
+            local nearestChest = CombatEngine.GetValidChests()[1]
             local chestRoot = nearestChest and nearestChest.Root
             local chestObj  = nearestChest and nearestChest.Object
             if chestRoot and chestRoot:IsA("BasePart") then
                 if not _autoAttackPaused then myHum.PlatformStand=true end
 
                 -- Cek per-model: chest BARU = butuh approach phase.
-                -- FIX: bandingkan dengan Object (model induk), bukan Root (Part anak)
-                -- agar respawn / animasi buka-tutup chest yang mengganti Part anak
-                -- tidak terus men-trigger ulang approach phase (CFrame ke lokasi yg sama).
                 local _chestKey = nearestChest.Object
                 if _G._chestApproached ~= _chestKey then
                     _G._chestApproached = _chestKey
-                    -- ▶ FASE 1: CFrame ke chest + proximity prompt + attack selama 1 detik
+                    -- ▶ FASE 1: CFrame ke chest + attack selama 1 detik (tanpa proximity prompt)
                     CombatEngine.ResetPhysics(myHRP)
                     myHRP.CFrame = CFrame.new(chestRoot.Position+Vector3.new(0,3,0), chestRoot.Position)
                     local elapsed = 0
                     while elapsed < 1 do
                         if not EngineConfig.AutoFarmActive then break end
-                        -- Coba fire proximity prompt (jika chest punya)
-                        pcall(function()
-                            local obj = chestObj or chestRoot.Parent
-                            if obj then
-                                for _,desc in ipairs(obj:GetDescendants()) do
-                                    if desc:IsA("ProximityPrompt") then fireproximityprompt(desc) end
-                                end
-                            end
-                        end)
                         -- Kirim attack ke chest
-                        pcall(function()
-                            PlayerActionRE:FireServer("SkillAction","BaseAttack",3,chestRoot.CFrame)
-                        end)
+                        FireWeaponAttack(chestObj, chestRoot.CFrame)
                         task.wait(0.1)
                         elapsed = elapsed + 0.1
                     end
@@ -186,14 +250,13 @@ local function startFarmLoop()
                 if EngineConfig.AutoFarmActive then
                     local targetCF=GetPositionCFrame(chestRoot.Position,EngineConfig.FarmPosition)
                     ApplyMovement(myHRP,targetCF)
-                    -- Attack dibatasi 1x per FARM_ATTACK_INTERVAL, movement tetap jalan tiap CFrameDelay
+                    -- Attack dibatasi per interval weapon: Bow lebih cepat (BOW_ATTACK_INTERVAL), Heavy normal
                     local now=tick()
-                    if now-_lastFarmAttack >= FARM_ATTACK_INTERVAL and not _autoAttackPaused then
+                    local _atkInterval = EngineConfig.SelectedWeapon=="Bow" and BOW_ATTACK_INTERVAL or FARM_ATTACK_INTERVAL
+                    if now-_lastFarmAttack >= _atkInterval and not _autoAttackPaused then
                         _lastFarmAttack=now
                         local atkCF=chestRoot.CFrame
-                        for _=1,EngineConfig.HitMultiplier do
-                            task.defer(function() pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,atkCF) end) end)
-                        end
+                        task.defer(function() FireWeaponAttack(chestObj, atkCF) end)
                     end
                     task.wait(EngineConfig.CFrameDelay)
                 else
@@ -201,63 +264,85 @@ local function startFarmLoop()
                 end
             else Services.RunService.Heartbeat:Wait() end
 
-        -- ──────────────── PRIORITAS 2: EGG (max 50 stud — lebih dari itu SKIP) ────────────────
-        -- [FIX] Active TIDAK dipakai sebagai syarat masuk — Active baru jadi true
-        -- SETELAH proximity di-fire (fase approach kita sendiri yang memicunya),
-        -- jadi kalau disyaratkan di gate ini akan deadlock: bot tidak mau approach
-        -- karena belum Active, padahal Active tidak akan pernah true kalau tidak
-        -- di-approach. Broken tetap dicek karena itu sinyal akhir (egg sudah pecah).
-        elseif EngineConfig.FarmTargetEgg and (function()
-            local egg=GetActiveDragonEgg()
-            local ep=egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
-            local broken = egg and egg:GetAttribute("Broken")
-            return ep and not broken and (ep.Position-myHRP.Position).Magnitude<=500
+        -- ──────────────── PRIORITAS 2: EGG ────────────────
+        -- [GUARD] Hanya 1 egg per sesi; setelah egg hancur (_eggSessionDone=true),
+        -- karakter harus hit monster dulu sebelum bisa menargetkan egg berikutnya.
+        -- [WINDOW 7 DETIK] Egg hanya boleh ditarget dalam 7 detik sejak monster terakhir di-hit.
+        -- Jika window habis (atau belum pernah hit monster), egg di-skip sampai fase monster berikutnya.
+        elseif EngineConfig.FarmTargetEgg and not _G._eggSessionDone
+            and _G._eggWindowStart > 0
+            and (tick() - _G._eggWindowStart) <= 7
+            and (function()
+            local egg = GetActiveDragonEgg()
+            return egg and not egg:GetAttribute("Broken")
         end)() then
             noTargetTimer=0; EngineConfig.IsLockDelay=false
-            local egg=GetActiveDragonEgg()
-            local eggPart = egg and egg:FindFirstChild("EggModel") and egg.EggModel:FindFirstChild("Part")
-            -- Reset jika egg hilang atau sudah pecah
-            -- (Broken dicek langsung, tidak nunggu part-nya hilang ±2 detik).
-            if not eggPart or egg:GetAttribute("Broken") then
-                _G._eggApproached=nil
-                eggPart=nil
+            local egg = GetActiveDragonEgg()
+            -- Reset jika egg hilang atau sudah pecah; tandai sesi egg selesai
+            if not egg or egg:GetAttribute("Broken") then
+                if _G._eggApproached then _G._eggSessionDone = true end
+                _G._eggApproached = nil
             end
-            if eggPart then
+            if egg and not egg:GetAttribute("Broken") then
                 if not _autoAttackPaused then myHum.PlatformStand=true end
 
-                -- Cek per-referensi: egg BERBEDA = pendekatan baru (fix bug multi-egg)
-                if _G._eggApproached ~= eggPart then
-                    _G._eggApproached = eggPart  -- simpan referensi egg ini, bukan boolean
-                    -- ▶ FASE 1: CFrame ke egg, diam 1 detik sambil proximity + attack dikirim
+                -- Cek per-referensi: egg BERBEDA = pendekatan baru
+                if _G._eggApproached ~= egg then
+                    _G._eggApproached = egg
+                    -- ▶ FASE 1: CFrame ke model Workspace.DragonEgg + full auto attack
+                    local eggCF = egg:IsA("BasePart") and egg.CFrame
+                        or (egg.PrimaryPart and egg.PrimaryPart.CFrame or egg:GetPivot())
                     CombatEngine.ResetPhysics(myHRP)
-                    myHRP.CFrame = CFrame.new(eggPart.Position+Vector3.new(0,3,0), eggPart.Position)
+                    myHRP.CFrame = eggCF + Vector3.new(0, 3, 0)
                     local elapsed = 0
                     while elapsed < 1 do
                         if not EngineConfig.AutoFarmActive then break end
                         if egg:GetAttribute("Broken") then break end
-                        -- Kirim proximity prompt
+                        -- Guard window: jika 7 detik habis di tengah Fase 1, hentikan segera
+                        if (tick() - _G._eggWindowStart) > 7 then
+                            _G._eggSessionDone = true
+                            _G._eggApproached  = nil
+                            break
+                        end
                         pcall(function()
-                            for _,obj in ipairs(egg:GetDescendants()) do
+                            for _, obj in ipairs(egg:GetDescendants()) do
                                 if obj:IsA("ProximityPrompt") then fireproximityprompt(obj) end
                             end
                         end)
-                        -- Kirim auto attack ke egg selama fase approach
-                        pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,eggPart.CFrame) end)
+                        -- Full auto attack: fire setiap 0.1 detik tanpa throttle interval
+                        FireWeaponAttack(egg, eggCF)
                         task.wait(0.1)
                         elapsed = elapsed + 0.1
                     end
                 end
 
-                -- ▶ FASE 2: Orbit (setelah 1 detik approach selesai)
-                local dropCF = GetPositionCFrame(eggPart.Position, EngineConfig.FarmPosition)
+                -- ▶ FASE 2: Orbit di sekitar DragonEgg + full auto attack setiap frame
+                -- Guard: jika window 7 detik habis di tengah Fase 2, skip egg
+                if (tick() - _G._eggWindowStart) > 7 then
+                    _G._eggSessionDone = true
+                    _G._eggApproached  = nil
+                else
+                local eggPivot = egg:IsA("BasePart") and egg.Position
+                    or (egg.PrimaryPart and egg.PrimaryPart.Position or egg:GetPivot().Position)
+                local dropCF = GetPositionCFrame(eggPivot, EngineConfig.FarmPosition)
                 ApplyMovement(myHRP, dropCF)
-
+                -- Full auto attack: fire setiap iterasi tanpa batasan _lastFarmAttack
+                if not _autoAttackPaused then
+                    local atkCF = egg:IsA("BasePart") and egg.CFrame
+                        or (egg.PrimaryPart and egg.PrimaryPart.CFrame or egg:GetPivot())
+                    task.defer(function() FireWeaponAttack(egg, atkCF) end)
+                end
                 task.wait(EngineConfig.CFrameDelay)
+                end -- end window guard FASE 2
             else Services.RunService.Heartbeat:Wait() end
 
         -- ──────────────── PRIORITAS 3: MONSTER ────────────────
         elseif EngineConfig.FarmTargetMonster and #CombatEngine.GetValidMonsters()>0 then
             noTargetTimer=0; EngineConfig.IsLockDelay=false
+            -- Tandai: monster terdeteksi → chest & egg boleh diproses
+            _G._worldHasMonster = true
+            _G._eggSessionDone  = false  -- karakter sudah hit monster → egg boleh ditarget lagi
+            _G._eggWindowStart  = tick() -- reset window 7 detik: egg boleh ditarget mulai sekarang
             -- Tandai: ada monster di World3 → orbit akan dipicu saat monster habis
             if worldIdx==3 then _G._world3OrbitDone=false end
             if not _autoAttackPaused then myHum.PlatformStand=true end
@@ -266,26 +351,128 @@ local function startFarmLoop()
             local tPart=target and (target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart)
             local tHum=target and target:FindFirstChildOfClass("Humanoid")
             if tPart and (not tHum or tHum.Health>0) then
-                -- Simpan posisi monster terakhir (World3) & tandai ada target (Endless Tower)
+                -- Simpan posisi monster terakhir (World3 & Endless Tower)
                 if worldIdx==3 then _G._world3LastMonsterPos = tPart.Position end
+                if worldIdx==4 then _G._endlessTowerLastPos  = tPart.Position end
+                local _endlessTowerFollowing = false
                 if worldIdx==4 then
+                    if _G._endlessTowerDone then
+                        -- Monster pertama wave baru → mulai Fase 1 (4 detik: 1s ikut, 2s diam, 1s ikut)
+                        local t = tick()
+                        _G._endlessTowerFollowStartAt = t
+                        _G._endlessTowerFollowEndAt   = t + 4
+                        _G._endlessTowerFreezePos     = nil
+                        _G._endlessTowerFixedY        = nil
+                        if _G._endlessTowerYLockConn then pcall(function() _G._endlessTowerYLockConn:Disconnect() end) end
+                        _G._endlessTowerYLockConn     = nil
+                    end
+                    -- Monster hadir → matikan Heartbeat hover (jika masih aktif dari countdown sebelumnya)
+                    if _G._endlessTowerHoverConn then
+                        pcall(function() _G._endlessTowerHoverConn:Disconnect() end)
+                        _G._endlessTowerHoverConn = nil
+                    end
                     _G._endlessTowerHadTarget = true
-                    _G._endlessTowerDone      = false  -- target baru aktif → izinkan CFrame sekali lagi saat habis nanti
+                    _G._endlessTowerDone      = false
+                    _endlessTowerFollowing = tick() < (_G._endlessTowerFollowEndAt or 0)
+                    -- Jika musuh muncul saat countdown 10 detik masih aktif →
+                    -- skip Fase 1 (-50), langsung masuk Fase 2 Y-locked (FarmPosition)
+                    -- _endlessTowerFixedY dibiarkan nil agar Fase 2 snap ke FarmPosition
+                    if tick() < (_G._endlessTowerWaitUntil or 0) then
+                        _endlessTowerFollowing = false
+                        _G._endlessTowerFixedY = nil
+                    end
                 end
-                local isBoss=CombatEngine.GetLevelType(target)=="boss"
-                local savedH=EngineConfig.StandHeight
-                if isBoss then EngineConfig.StandHeight=EngineConfig.BossHeight end
-                local targetCF=GetPositionCFrame(tPart.Position,EngineConfig.FarmPosition)
-                EngineConfig.StandHeight=savedH
-                ApplyMovement(myHRP,targetCF)
-                -- Attack dibatasi 1x per FARM_ATTACK_INTERVAL, movement tetap jalan tiap CFrameDelay
+                if worldIdx==4 and _endlessTowerFollowing then
+                    -- [ENDLESS TOWER] Fase 1 — 4 detik: 1s ikut → 2s diam → 1s ikut
+                    local elapsed = tick() - (_G._endlessTowerFollowStartAt or 0)
+                    CombatEngine.ResetPhysics(myHRP)
+                    if elapsed < 1 or elapsed >= 3 then
+                        -- Detik 0-1 dan 3-4: ikut monster (offset -50)
+                        local pos = tPart.Position + Vector3.new(0, -50, 0)
+                        if elapsed < 1 then
+                            _G._endlessTowerFreezePos = pos  -- simpan untuk fase diam
+                        end
+                        local dir = (tPart.Position - pos)
+                        if dir.Magnitude < 0.01 then dir = Vector3.new(1,0,0) end
+                        myHRP.CFrame = CFrame.new(pos, pos + dir.Unit)
+                    else
+                        -- Detik 1-3: diam di posisi terakhir
+                        local fpos = _G._endlessTowerFreezePos or (tPart.Position + Vector3.new(0,-50,0))
+                        local dir  = (tPart.Position - fpos)
+                        if dir.Magnitude < 0.01 then dir = Vector3.new(1,0,0) end
+                        myHRP.CFrame = CFrame.new(fpos, fpos + dir.Unit)
+                    end
+                elseif worldIdx==4 then
+                    -- [ENDLESS TOWER] Fase 2 — Y-Locked Follow (setelah fase follow selesai):
+                    -- Y dikunci di ketinggian sesuai FarmPosition (Orbit Atas/Bawah/Diam Atas/dll),
+                    -- sedangkan X dan Z tetap mengikuti monster yang bergerak.
+                    -- Frame pertama: snap langsung ke posisi benar agar tidak ada artefak naik dari bawah.
+                    if not _G._endlessTowerFixedY then
+                        local snapCF = GetPositionCFrame(tPart.Position, EngineConfig.FarmPosition)
+                        _G._endlessTowerFixedY = snapCF.Position.Y
+                        CombatEngine.ResetPhysics(myHRP)
+                        myHRP.CFrame = snapCF
+                        -- Spawn Heartbeat koreksi Y: jika drift > 2 stud dari Y terkunci → snap kembali
+                        if _G._endlessTowerYLockConn then pcall(function() _G._endlessTowerYLockConn:Disconnect() end) end
+                        _G._endlessTowerYLockConn = Services.RunService.Heartbeat:Connect(function()
+                            local lockedY = _G._endlessTowerFixedY
+                            if not lockedY then
+                                pcall(function() _G._endlessTowerYLockConn:Disconnect() end)
+                                _G._endlessTowerYLockConn = nil
+                                return
+                            end
+                            local c   = LocalPlayer.Character
+                            local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                            if hrp and math.abs(hrp.Position.Y - lockedY) > 2 then
+                                hrp.AssemblyLinearVelocity  = Vector3.zero
+                                hrp.AssemblyAngularVelocity = Vector3.zero
+                                local cf = hrp.CFrame
+                                hrp.CFrame = CFrame.new(cf.Position.X, lockedY, cf.Position.Z) * cf.Rotation
+                            end
+                        end)
+                    end
+                    -- Hitung posisi setiap frame: X,Z ikut monster, Y terkunci
+                    local r     = EngineConfig.OrbitRadius
+                    local locY  = _G._endlessTowerFixedY
+                    local angle = tick() * EngineConfig.OrbitSpeed
+                    local mode  = EngineConfig.FarmPosition
+                    local pos
+                    if mode=="Orbit Atas" or mode=="Orbit Bawah" or mode=="Orbit Samping" then
+                        pos = Vector3.new(
+                            tPart.Position.X + math.cos(angle) * r,
+                            locY,
+                            tPart.Position.Z + math.sin(angle) * r
+                        )
+                    elseif mode=="Depan Target" then
+                        pos = Vector3.new(tPart.Position.X + r, locY, tPart.Position.Z)
+                    elseif mode=="Belakang Target" then
+                        pos = Vector3.new(tPart.Position.X - r, locY, tPart.Position.Z)
+                    else
+                        -- Diam Atas, Diam Bawah, Acak, default
+                        pos = Vector3.new(tPart.Position.X, locY, tPart.Position.Z)
+                    end
+                    local dir = (tPart.Position - pos)
+                    if dir.Magnitude < 0.01 then dir = Vector3.new(1, 0, 0) end
+                    local targetCF = CFrame.new(pos, pos + dir.Unit)
+                    ApplyMovement(myHRP, targetCF)
+                else
+                    local isBoss=CombatEngine.GetLevelType(target)=="boss"
+                    local savedH=EngineConfig.StandHeight
+                    if isBoss then EngineConfig.StandHeight=EngineConfig.BossHeight end
+                    local targetCF=GetPositionCFrame(tPart.Position,EngineConfig.FarmPosition)
+                    EngineConfig.StandHeight=savedH
+                    ApplyMovement(myHRP,targetCF)
+                end
+                -- Attack dibatasi per interval weapon: Bow lebih cepat (BOW_ATTACK_INTERVAL), Heavy normal
+                -- [ENDLESS TOWER] Selama fase follow (5 detik pertama), attack & skill
+                -- dijeda total — baru mulai lagi setelah fase follow selesai.
                 local now=tick()
-                if now-_lastFarmAttack >= FARM_ATTACK_INTERVAL and not _autoAttackPaused then
+                local _atkInterval = EngineConfig.SelectedWeapon=="Bow" and BOW_ATTACK_INTERVAL or FARM_ATTACK_INTERVAL
+                if now-_lastFarmAttack >= _atkInterval and not _autoAttackPaused then
                     _lastFarmAttack=now
                     local atkCF=tPart.CFrame
-                    for _=1,EngineConfig.HitMultiplier do
-                        task.defer(function() pcall(function() PlayerActionRE:FireServer("SkillAction","BaseAttack",3,atkCF) end) end)
-                    end
+                    -- Bow: BaseAttack combo-6 + BulletShoot ke Model monster yang nyata
+                    task.defer(function() FireWeaponAttack(target, atkCF) end)
                 end
                 task.wait(EngineConfig.CFrameDelay)
             else Services.RunService.Heartbeat:Wait() end
@@ -300,35 +487,73 @@ local function startFarmLoop()
             if not _autoAttackPaused then myHum.PlatformStand=true end
             CombatEngine.ResetPhysics(myHRP)
 
-            -- [ENDLESS TOWER] CFrame ke portal, jeda 3 detik antar CFrame.
-            -- Jika baru habis target → tunggu 2 detik dulu sebelum CFrame pertama.
+            -- [ENDLESS TOWER] Tidak ada monster:
+            --   • Saat monster baru saja habis → set delay 10 detik, tandai wave selesai.
+            --   • Selama hitung mundur 10 detik → tahan karakter di Y=35 (siap menyambut wave baru).
+            --     Jika musuh muncul di tengah hitung mundur, loop langsung masuk MONSTER branch
+            --     dan Fase 1 (-50) aktif otomatis karena _endlessTowerDone=true sudah terset.
+            --   • Setelah delay 10 detik → CFrame ke Portal, ulangi setiap 7 detik
+            --     selama masih tidak ada monster (terpisah dari logika Fase 1).
             if worldIdx==4 then
+                -- Guard: jangan set _endlessTowerDone=true saat masih dalam Fase 1
+                -- (NPC baru spawn kadang belum punya HumanoidRootPart → GetValidMonsters()
+                -- return 0 sesaat → tanpa guard ini _endlessTowerDone=true akan restart Fase 1)
+                -- PENTING: countdown 10 detik SELALU dimulai saat hadTarget=true,
+                -- tidak peduli fase1Active — supaya tidak langsung CFrame ke portal.
+                local fase1Active = tick() < (_G._endlessTowerFollowEndAt or 0)
                 if _G._endlessTowerHadTarget then
-                    -- Target baru saja habis: set delay 2 detik sebelum CFrame pertama
                     _G._endlessTowerHadTarget = false
-                    _G._endlessTowerWaitUntil = tick() + 2
-                end
-                -- One-shot: hanya CFrame sekali per sesi "tidak ada target".
-                -- Tidak akan CFrame lagi sampai target baru muncul & habis lagi
-                -- (flag _endlessTowerDone direset di blok MONSTER di atas).
-                if not _G._endlessTowerDone and tick() >= (_G._endlessTowerWaitUntil or 0) then
-                    local fxCFrame
-                    pcall(function()
-                        local fxPart = Workspace.World.Start.Portal.EnemySpawnPortal.FX_SlowAOE
-                        CombatEngine.ResetPhysics(myHRP)
-                        myHRP.CFrame = fxPart.CFrame
-                        fxCFrame = fxPart.CFrame
-                    end)
-                    _G._endlessTowerDone = true  -- sudah CFrame sekali; jangan ulang
-
-                    -- [ENDLESS TOWER] Setelah CFrame sekali ke portal spawn, diam total
-                    -- (tidak ada gerakan/bob) di posisi itu sampai monster muncul atau
-                    -- farm dimatikan — tidak re-teleport berulang.
-                    if fxCFrame then
-                        while anyFarmToggleActive()
-                              and #CombatEngine.GetValidMonsters()==0 do
-                            task.wait(0.2)
+                    _G._endlessTowerWaitUntil = tick() + 10
+                    if not fase1Active then
+                        -- Aman di-mark selesai (bukan window flicker NPC)
+                        _G._endlessTowerDone = true  -- wave selesai; monster berikutnya trigger Fase 1
+                    end
+                    -- Monster habis → hentikan Y-lock (hover conn mengambil alih)
+                    if _G._endlessTowerYLockConn then pcall(function() _G._endlessTowerYLockConn:Disconnect() end) end
+                    _G._endlessTowerYLockConn = nil
+                    -- Spawn Heartbeat connection: kunci CFrame setiap frame (~60Hz)
+                    -- supaya karakter benar-benar diam, bukan jitter 10fps dari task.wait(0.1)
+                    if _G._endlessTowerHoverConn then pcall(function() _G._endlessTowerHoverConn:Disconnect() end) end
+                    local _hoverCenter = _G._endlessTowerLastPos or myHRP.Position
+                    local _hoverY      = _hoverCenter.Y + EngineConfig.EndlessTowerHoverY
+                    local _hoverCF     = CFrame.new(_hoverCenter.X, _hoverY, _hoverCenter.Z)
+                    _G._endlessTowerHoverConn = Services.RunService.Heartbeat:Connect(function()
+                        if tick() >= (_G._endlessTowerWaitUntil or 0) then
+                            pcall(function() _G._endlessTowerHoverConn:Disconnect() end)
+                            _G._endlessTowerHoverConn = nil
+                            return
                         end
+                        local c   = LocalPlayer.Character
+                        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                        local hum = c and c:FindFirstChildOfClass("Humanoid")
+                        if hrp then
+                            if hum then hum.PlatformStand = true end
+                            hrp.AssemblyLinearVelocity  = Vector3.zero
+                            hrp.AssemblyAngularVelocity = Vector3.zero
+                            hrp.CFrame = _hoverCF
+                        end
+                    end)
+                end
+                -- Selama hitung mundur 10 detik: Heartbeat connection sudah mengurus CFrame.
+                -- Blok ini hanya sebagai fallback jika connection belum spawn (frame pertama).
+                if tick() < (_G._endlessTowerWaitUntil or 0) then
+                    local center = _G._endlessTowerLastPos or myHRP.Position
+                    CombatEngine.ResetPhysics(myHRP)
+                    myHRP.CFrame = CFrame.new(center.X, center.Y + EngineConfig.EndlessTowerHoverY, center.Z)
+                else
+                    -- Countdown selesai → pastikan done=true supaya wave berikutnya dapat Fase 1
+                    -- (menangani kasus monster mati di dalam window fase1Active sehingga
+                    --  done belum di-set di blok atas)
+                    _G._endlessTowerDone = true
+                    -- Setelah delay 10 detik: CFrame ke Portal setiap 7 detik
+                    local now = tick()
+                    if now - (_G._endlessTowerPortalAt or 0) >= 7 then
+                        pcall(function()
+                            local fxPart = Workspace.World.Start.Portal.EnemySpawnPortal.FX_SlowAOE
+                            CombatEngine.ResetPhysics(myHRP)
+                            myHRP.CFrame = fxPart.CFrame
+                        end)
+                        _G._endlessTowerPortalAt = now
                     end
                 end
             end
@@ -363,6 +588,8 @@ local function startFarmLoop()
             -- (jika hanya Chest/Egg yang on, tidak perlu cari world baru)
             if noTargetTimer>=3 and EngineConfig.FarmTargetMonster then
                 noTargetTimer=0
+                -- Tandai: karakter sudah melakukan find → chest & egg boleh diproses
+                _G._worldHasFind = true
                 if worldIdx==1 then Navigation.SearchWorld1(myHRP,myHum)
                 elseif worldIdx==2 then Navigation.SearchWorld2(myHRP,myHum)
                 elseif worldIdx==3 then Navigation.SearchWorld3(myHRP,myHum)
@@ -374,6 +601,11 @@ local function startFarmLoop()
     end
 
     -- Cleanup saat Auto Farm dimatikan
+    pcall(function() _physicsConn:Disconnect() end)
+    if _G._endlessTowerHoverConn then
+        pcall(function() _G._endlessTowerHoverConn:Disconnect() end)
+        _G._endlessTowerHoverConn = nil
+    end
     pcall(function()
         local char=LocalPlayer.Character
         local myHum=char and char:FindFirstChildOfClass("Humanoid")
@@ -478,6 +710,22 @@ local function FindGoldShopRemote()
     return nil
 end
 
+-- Dapatkan ScrollingFrame Season Shop
+-- Path: PlayerGui.MainGuiIgnoreGuiInset.ScreenSeasonPass.StoreStatistics.NormalFrame.ScrollingFrame
+local function FindSeasonShopScrollingFrame()
+    local pgui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not pgui then return nil end
+    local ok, sf = pcall(function()
+        return pgui
+            :FindFirstChild("MainGuiIgnoreGuiInset")
+            :FindFirstChild("ScreenSeasonPass")
+            :FindFirstChild("StoreStatistics")
+            :FindFirstChild("NormalFrame")
+            :FindFirstChild("ScrollingFrame")
+    end)
+    return (ok and sf) or nil
+end
+
 -- Dapatkan ScrollingFrame toko (ScreenConsumableShop)
 local function FindGoldShopScrollingFrame()
     local pgui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -533,6 +781,7 @@ task.spawn(function()
     end
 end)
 
+-- Loop: Auto Buy — Gold & Bond (klik BuyBTN di ConsumableShop GUI)
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -555,6 +804,24 @@ task.spawn(function()
                             end
                         end
                     end
+                end
+            end
+        end
+    end
+end)
+
+-- Loop: Auto Buy — Season (FireServer langsung, tidak butuh GUI terbuka)
+task.spawn(function()
+    local SeasonUtilRE = H.SeasonUtilRE
+    while true do
+        task.wait(0.5)
+        if EngineConfig.AutoBuyActive and SeasonUtilRE then
+            for itemName in pairs(EngineConfig.AutoBuyTargetList) do
+                if itemName:find("^SeasonShop_") then
+                    pcall(function()
+                        SeasonUtilRE:FireServer("BuySeasonShopItem", itemName)
+                    end)
+                    task.wait(0.3)
                 end
             end
         end
@@ -720,4 +987,5 @@ end)
 -- Export ke Hub
 --------------------------------------------------------------------------------
 H.startFarmLoop             = startFarmLoop
-H.FindGoldShopScrollingFrame = FindGoldShopScrollingFrame  -- digunakan tab_autobuy
+H.FindGoldShopScrollingFrame  = FindGoldShopScrollingFrame   -- digunakan tab_autobuy
+H.FindSeasonShopScrollingFrame = FindSeasonShopScrollingFrame -- digunakan tab_autobuy
