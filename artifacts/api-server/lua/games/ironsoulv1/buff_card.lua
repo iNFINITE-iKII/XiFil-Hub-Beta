@@ -1,117 +1,155 @@
 --------------------------------------------------------------------------------
 --// buff_card.lua — Auto Buff Card Selector
--- Strategi: daripada menebak args FireServer, langsung klik BTN di tiap slot
--- menggunakan firebutton (exploit API) — game yang handle semua logikanya.
+-- Mendeteksi kartu di PlayerBonusCard.Cards lalu otomatis fire RemoteEvent
+-- sesuai toggle yang diaktifkan user. Fire hanya 1x per update kartu.
 --
--- Priority rules (kartu yang diclick):
---   1. Jika kategori match → click BTN slot tersebut
---   2. Slot 4 (Unlock) dan slot 1-3 (Select) sama-sama langsung diklik
---   3. Jika satu kategori muncul di beberapa slot → klik semua yang match
+-- Slot 1-3 → FireServer("Select", slotNum)
+-- Slot 4   → FireServer("Unlock", 4)
+--
+-- Priority rules:
+--   1. Jika kartu sama muncul di Unlock (4) DAN Select (1-3) → hanya fire Unlock
+--   2. Jika kartu sama di beberapa slot Select → pilih slot tertinggi
+--   3. Jika user enable beberapa kartu dengan nama dasar sama → pilih numeral tertinggi
+--   4. Numeral sama → pilih yang pertama di-toggle (urutan di CARD_NAMES)
 --------------------------------------------------------------------------------
-local H            = getgenv().Hub
-local EngineConfig = H.EngineConfig
-local Services     = H.Services
-local LocalPlayer  = Services.Players.LocalPlayer
+local H                = getgenv().Hub
+local EngineConfig     = H.EngineConfig
+local WorldBonusCardRE = H.WorldBonusCardRE
+local Services         = H.Services
+local LocalPlayer      = Services.Players.LocalPlayer
+
+-- Ordered list — posisi menentukan tie-breaker "pertama di-toggle"
+local CARD_NAMES = {
+    "Skill Cooldown I",   "Dash Cooldown II",  "Critical Damage VI",
+    "Critical Chance I",  "Healing IV",         "Frost IV",
+    "Base Attack V",      "Dash Speed V",        "Attack I",
+    "Coroside III",       "Methyais VI",         "Movement Speed IV",
+    "MAX Health IV",
+}
+
+local TOGGLE_ORDER = {}
+for i, name in ipairs(CARD_NAMES) do TOGGLE_ORDER[name] = i end
 
 -- Roman numeral parser (trailing suffix)
-local ROMAN = {I=1,V=5,X=10,L=50,C=100,D=500,M=1000}
+local ROMAN = {I=1, V=5, X=10, L=50, C=100, D=500, M=1000}
 local function romanVal(cardName)
     local s = (cardName:match("%s([IVXLCDMivxlcdm]+)$") or ""):upper()
     if s == "" then return 0 end
     local val, prev = 0, 0
     for i = #s, 1, -1 do
-        local c = ROMAN[s:sub(i,i)] or 0
+        local c = ROMAN[s:sub(i, i)] or 0
         if c < prev then val = val - c else val = val + c end
         prev = c
     end
     return val
 end
 
--- Ambil nama dasar kartu (buang angka romawi di akhir)
 local function baseName(name)
     return name:match("^(.-)%s+[IVXLCDMivxlcdm]+$") or name
 end
 
--- Baca teks kartu: scan SEMUA TextLabel, prioritaskan bernama "Name"/"Title"
-local function getCardText(item)
-    local best = nil
-    for _, d in ipairs(item:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Text ~= "" then
-            local t = d.Text:gsub("\n"," "):match("^%s*(.-)%s*$")
-            if t and #t >= 3 and not t:match("^[%d%s%p]+$") then
-                if d.Name == "Name" or d.Name == "Title" then
-                    return t  -- prioritas tertinggi
-                end
-                if not best then best = t end
-            end
-        end
-    end
-    return best
-end
-
--- Cek apakah teks kartu match dengan kategori yang di-enable
-local function isEnabled(cardText)
+-- Case-insensitive match terhadap kartu yang di-enable user
+local function matchEnabled(cardText)
     local enabled = EngineConfig.BuffCardEnabled or {}
     local base = baseName(cardText):lower()
     for cat, on in pairs(enabled) do
-        if on and cat:lower() == base then return true, cat end
-    end
-    return false, nil
-end
-
--- Cari BTN (tombol) di dalam slot item
-local function findButton(item)
-    -- Path yang sudah diketahui: item.BTN
-    local btn = item:FindFirstChild("BTN")
-    if btn and (btn:IsA("TextButton") or btn:IsA("ImageButton") or btn:IsA("GuiButton")) then
-        return btn
-    end
-    -- Kalau BTN ada tapi bukan GuiButton langsung, cari GuiButton di dalamnya
-    if btn then
-        for _, d in ipairs(btn:GetDescendants()) do
-            if d:IsA("TextButton") or d:IsA("ImageButton") then return d end
-        end
-        -- BTN itu sendiri mungkin Frame yang bertindak sebagai tombol
-        -- coba return BTN-nya langsung (beberapa executor support frame juga)
-        return btn
-    end
-    -- Fallback: scan seluruh slot
-    for _, d in ipairs(item:GetDescendants()) do
-        if d:IsA("TextButton") or d:IsA("ImageButton") then return d end
+        if on and cat:lower() == base then return cat end
     end
     return nil
 end
 
--- Klik satu slot kartu menggunakan exploit firebutton
-local function clickSlot(item, cardText)
-    local btn = findButton(item)
-    if not btn then
-        warn("[XiFil BuffCard] Tidak ada button di slot", item.Name, "— skip")
-        return
-    end
-    print("[XiFil BuffCard] Klik slot", item.Name, "/", cardText, "→", btn:GetFullName())
+-- Lazy-fetch WorldBonusCardRE kalau nil saat core.lua load terlalu awal
+local function getWBCRE()
+    if H.WorldBonusCardRE then return H.WorldBonusCardRE end
+    local ok, re = pcall(function()
+        return game:GetService("ReplicatedStorage")
+            :WaitForChild("Framework",10)
+            :WaitForChild("Gameplay",10)
+            :WaitForChild("WorldPlace",10)
+            :WaitForChild("WorldBonusCardUtil",10)
+            :WaitForChild("RemoteEvent",10)
+    end)
+    if ok and re then H.WorldBonusCardRE = re end
+    return H.WorldBonusCardRE
+end
 
-    -- firebutton: standard exploit API (Synapse, KRNL, Xeno, dsb.)
-    local ok1 = pcall(firebutton, btn, "")
-    if not ok1 then
-        -- Fallback: fire signal MouseButton1Click langsung
-        local ok2 = pcall(function() btn.MouseButton1Click:Fire() end)
-        if not ok2 then
-            warn("[XiFil BuffCard] firebutton dan MouseButton1Click:Fire() keduanya gagal untuk", btn:GetFullName())
+-- Baca teks kartu dari instance item (untuk computeActions)
+local function getCardText(item)
+    local ok, lbl = pcall(function() return item.BTN.Stat.Name end)
+    if ok and lbl and lbl:IsA("TextLabel") then
+        return lbl.Text:gsub("\n", " "):match("^%s*(.-)%s*$")
+    end
+    for _, d in ipairs(item:GetDescendants()) do
+        if d.Name == "Name" and d:IsA("TextLabel") then
+            return d.Text:gsub("\n", " "):match("^%s*(.-)%s*$")
         end
     end
+    return nil
 end
 
--- Cari Cards container di mana pun dalam PlayerGui (recursive)
-local function findCardsContainer()
+-- Hitung aksi yang perlu di-fire (membaca semua slot sekaligus untuk priority)
+local function computeActions()
+    local re = getWBCRE()
+    if not re then return {} end
     local gui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not gui then return nil end
-    local pbc = gui:FindFirstChild("PlayerBonusCard", true)
-    if not pbc then return nil end
-    return pbc:FindFirstChild("Cards")
+    if not gui then return {} end
+    local ok, cards = pcall(function()
+        return gui.MainGuiIgnoreGuiInset.PlayerBonusCard.Cards
+    end)
+    if not ok or not cards then return {} end
+
+    local matched = {}
+    for _, item in ipairs(cards:GetChildren()) do
+        local slotNum = tonumber(item.Name:match("^Item(%d+)$"))
+        if slotNum then
+            local text = getCardText(item)
+            if text and text ~= "" then
+                local ename = matchEnabled(text)
+                if ename then
+                    if not matched[ename] then
+                        matched[ename] = { slots = {}, unlock = false }
+                    end
+                    if slotNum == 4 then
+                        matched[ename].unlock = true
+                    else
+                        table.insert(matched[ename].slots, slotNum)
+                    end
+                end
+            end
+        end
+    end
+
+    local baseGroups = {}
+    for name, data in pairs(matched) do
+        local base = baseName(name)
+        if not baseGroups[base] then baseGroups[base] = {} end
+        table.insert(baseGroups[base], { name = name, data = data })
+    end
+
+    local actions = {}
+    for _, group in pairs(baseGroups) do
+        table.sort(group, function(a, b)
+            if a.data.unlock ~= b.data.unlock then return a.data.unlock end
+            local ra, rb = romanVal(a.name), romanVal(b.name)
+            if ra ~= rb then return ra > rb end
+            return (TOGGLE_ORDER[a.name] or 999) < (TOGGLE_ORDER[b.name] or 999)
+        end)
+        local best = group[1]
+        if best.data.unlock then
+            table.insert(actions, { action = "Unlock", slot = 4 })
+        elseif #best.data.slots > 0 then
+            local bestSlot = 0
+            for _, s in ipairs(best.data.slots) do
+                if s > bestSlot then bestSlot = s end
+            end
+            table.insert(actions, { action = "Select", slot = bestSlot })
+        end
+    end
+
+    return actions
 end
 
--- Proses semua kartu yang ada: click yang match kategori enabled
+-- Fire semua aksi (debounced)
 local _lastFire = 0
 local function fireBuffCards()
     if not EngineConfig.BuffCardActive then return end
@@ -119,82 +157,134 @@ local function fireBuffCards()
     if now - _lastFire < 0.3 then return end
     _lastFire = now
 
-    local cards = findCardsContainer()
-    if not cards then
-        print("[XiFil BuffCard] fireBuffCards: Cards tidak ditemukan")
-        return
-    end
+    local re = getWBCRE()
+    if not re then return end
 
-    local children = cards:GetChildren()
-    print("[XiFil BuffCard] fireBuffCards: scan", #children, "slot")
-
-    for _, item in ipairs(children) do
-        local text = getCardText(item)
-        if text then
-            local ok, cat = isEnabled(text)
-            if ok then
-                print("[XiFil BuffCard] Match:", item.Name, "→", text, "(cat:", cat..")")
-                clickSlot(item, text)
-            else
-                print("[XiFil BuffCard] No match:", item.Name, "→", text)
-            end
-        else
-            print("[XiFil BuffCard] Teks tidak terbaca di slot:", item.Name)
+    local actions = computeActions()
+    for _, act in ipairs(actions) do
+        if act.action == "Select" then
+            pcall(function() re:FireServer("Select", act.slot) end)
+        elseif act.action == "Unlock" then
+            pcall(function() re:FireServer("Unlock", 4) end)
         end
     end
 end
 
 --------------------------------------------------------------------------------
--- Monitor: pantau PlayerBonusCard di seluruh PlayerGui
+-- Scan engine — menggunakan pattern scan user
 --------------------------------------------------------------------------------
-task.spawn(function()
-    local gui = LocalPlayer:WaitForChild("PlayerGui", 30)
-    if not gui then warn("[XiFil BuffCard] PlayerGui tidak ditemukan"); return end
+local _scanConns    = {}   -- semua connections aktif
+local _scanRunning  = false
 
-    local function handlePBC(pbc)
-        print("[XiFil BuffCard] PlayerBonusCard ditemukan:", pbc:GetFullName())
-        local ok, cards = pcall(function() return pbc:WaitForChild("Cards", 15) end)
-        if not ok or not cards then
-            warn("[XiFil BuffCard] 'Cards' tidak ditemukan")
-            return
-        end
-        print("[XiFil BuffCard] Cards OK, awal:", #cards:GetChildren(), "item")
+local function cleanupScan()
+    _scanRunning = false
+    for _, c in ipairs(_scanConns) do pcall(function() c:Disconnect() end) end
+    _scanConns = {}
+end
 
-        task.wait(0.15)
+-- Pantau satu TextLabel "Name": fire sekarang + monitor perubahan teks
+local function pantauLabel(instance)
+    if instance.Name ~= "Name" or not instance:IsA("TextLabel") then return end
+
+    -- Fire untuk teks saat ini
+    if EngineConfig.BuffCardActive then
         fireBuffCards()
-
-        -- Pantau penambahan kartu baru
-        local conn = cards.DescendantAdded:Connect(function(desc)
-            if desc:IsA("TextLabel") or desc:IsA("Frame") or desc:IsA("ImageLabel") then
-                task.wait(0.15)
-                fireBuffCards()
-            end
-        end)
-
-        -- Tunggu sampai GUI hilang (ronde selesai)
-        repeat task.wait(0.5) until pbc.Parent == nil
-        pcall(function() conn:Disconnect() end)
-        print("[XiFil BuffCard] PlayerBonusCard hilang, tunggu ronde berikutnya")
     end
 
-    -- Scan existing
-    for _, desc in ipairs(gui:GetDescendants()) do
-        if desc.Name == "PlayerBonusCard" then
-            task.spawn(handlePBC, desc)
-        end
-    end
-
-    -- Listen untuk yang baru
-    gui.DescendantAdded:Connect(function(desc)
-        if desc.Name == "PlayerBonusCard" then
-            task.spawn(handlePBC, desc)
-        end
+    -- Monitor perubahan teks di label ini
+    local conn = instance:GetPropertyChangedSignal("Text"):Connect(function()
+        if not EngineConfig.BuffCardActive then return end
+        task.wait(0.05)
+        fireBuffCards()
     end)
+    table.insert(_scanConns, conn)
+end
 
-    print("[XiFil BuffCard] Monitor aktif")
-end)
+-- Scan rekursif untuk elemen yang sudah ada
+local function scanAwal(instance)
+    if not instance then return end
+    pantauLabel(instance)
+    for _, child in ipairs(instance:GetChildren()) do
+        scanAwal(child)
+    end
+end
 
-H.BuffCard_FireNow = fireBuffCards
+local function startScan()
+    if _scanRunning then
+        -- Sudah berjalan — cukup fire ulang untuk state sekarang
+        fireBuffCards()
+        return
+    end
+    _scanRunning = true
+
+    task.spawn(function()
+        local gui = LocalPlayer:WaitForChild("PlayerGui", 30)
+        if not gui then cleanupScan(); return end
+
+        print("[XiFil BuffCard] === MEMULAI PEMANTAUAN AUTO-UPDATE ===")
+
+        -- Tunggu Cards container muncul (loop agar tahan re-round)
+        while _scanRunning and EngineConfig.BuffCardActive do
+            local ok, cardsContainer = pcall(function()
+                return gui.MainGuiIgnoreGuiInset.PlayerBonusCard.Cards
+            end)
+
+            if ok and cardsContainer then
+                print("[XiFil BuffCard] Cards ditemukan — scan awal")
+
+                -- Reset koneksi lama kecuali _scanRunning flag
+                local oldConns = _scanConns
+                _scanConns = {}
+                for _, c in ipairs(oldConns) do pcall(function() c:Disconnect() end) end
+
+                -- Scan elemen yang sudah ada
+                scanAwal(cardsContainer)
+
+                -- Monitor elemen baru yang ditambahkan
+                local descConn = cardsContainer.DescendantAdded:Connect(function(descendant)
+                    if not EngineConfig.BuffCardActive then return end
+                    task.wait(0.1)
+                    pantauLabel(descendant)
+                end)
+                table.insert(_scanConns, descConn)
+
+                print("[XiFil BuffCard] === SCRIPT BERJALAN DI LATAR BELAKANG ===")
+
+                -- Tunggu sampai Cards hilang (ronde selesai) atau scan dimatikan
+                while _scanRunning and EngineConfig.BuffCardActive do
+                    task.wait(0.5)
+                    if not cardsContainer.Parent then
+                        print("[XiFil BuffCard] Cards hilang — tunggu ronde berikutnya")
+                        break
+                    end
+                end
+
+                -- Bersihkan koneksi ronde ini (tapi biarkan loop lanjut kalau masih aktif)
+                for _, c in ipairs(_scanConns) do pcall(function() c:Disconnect() end) end
+                _scanConns = {}
+
+            else
+                -- Cards belum ada, tunggu sebentar
+                task.wait(0.5)
+            end
+        end
+
+        -- Keluar dari loop = BuffCardActive OFF atau stopScan dipanggil
+        cleanupScan()
+        print("[XiFil BuffCard] Scan berhenti")
+    end)
+end
+
+local function stopScan()
+    cleanupScan()
+end
+
+H.BuffCard_FireNow  = function()
+    if EngineConfig.BuffCardActive then
+        startScan()
+    end
+end
+H.BuffCard_StopScan = stopScan
 
 --------------------------------------------------------------------------------
 -- Export

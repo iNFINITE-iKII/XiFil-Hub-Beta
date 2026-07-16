@@ -92,7 +92,11 @@ CreateSection(MainFarmPage, "Buff Card", "secBuffCard")
 
 _G.BuffCardToggle = CreateToggleUI(MainFarmPage, "🃏 Auto Buff Card", EngineConfig.BuffCardActive, function(v)
     EngineConfig.BuffCardActive = v
-    if v and H.BuffCard_FireNow then task.spawn(H.BuffCard_FireNow) end
+    if v then
+        if H.BuffCard_FireNow then task.spawn(H.BuffCard_FireNow) end
+    else
+        if H.BuffCard_StopScan then H.BuffCard_StopScan() end
+    end
 end, "lblBuffCard")
 
 local _buffCardNames = {
