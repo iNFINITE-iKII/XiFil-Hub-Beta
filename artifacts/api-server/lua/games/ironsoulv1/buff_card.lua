@@ -58,18 +58,23 @@ local function matchEnabled(cardText)
     return nil
 end
 
--- Lazy-fetch WorldBonusCardRE kalau nil saat core.lua load terlalu awal
+-- Lazy-fetch WorldBonusCardRE — non-blocking (FindFirstChild)
 local function getWBCRE()
     if H.WorldBonusCardRE then return H.WorldBonusCardRE end
     local ok, re = pcall(function()
-        return game:GetService("ReplicatedStorage")
-            :WaitForChild("Framework",10)
-            :WaitForChild("Gameplay",10)
-            :WaitForChild("WorldPlace",10)
-            :WaitForChild("WorldBonusCardUtil",10)
-            :WaitForChild("RemoteEvent",10)
+        local rs  = game:GetService("ReplicatedStorage")
+        local fw  = rs:FindFirstChild("Framework");          if not fw  then return nil end
+        local gp  = fw:FindFirstChild("Gameplay");           if not gp  then return nil end
+        local wp  = gp:FindFirstChild("WorldPlace");         if not wp  then return nil end
+        local wbc = wp:FindFirstChild("WorldBonusCardUtil"); if not wbc then return nil end
+        return wbc:FindFirstChild("RemoteEvent")
     end)
-    if ok and re then H.WorldBonusCardRE = re end
+    if ok and re then
+        H.WorldBonusCardRE = re
+        print("[XiFil BuffCard] WorldBonusCardRE ditemukan:", re:GetFullName())
+    else
+        print("[XiFil BuffCard] WorldBonusCardRE belum tersedia di ReplicatedStorage")
+    end
     return H.WorldBonusCardRE
 end
 
