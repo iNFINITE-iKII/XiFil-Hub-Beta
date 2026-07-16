@@ -210,16 +210,27 @@ local function scanAwal(instance)
 end
 
 local function startScan()
+    print("[XiFil BuffCard] startScan dipanggil, _scanRunning=" .. tostring(_scanRunning))
     if _scanRunning then
-        -- Sudah berjalan — cukup fire ulang untuk state sekarang
         fireBuffCards()
         return
     end
     _scanRunning = true
+    print("[XiFil BuffCard] task.spawn dimulai")
 
     task.spawn(function()
-        local gui = LocalPlayer:WaitForChild("PlayerGui", 30)
-        if not gui then cleanupScan(); return end
+        print("[XiFil BuffCard] task jalan")
+
+        -- Cari PlayerGui tanpa WaitForChild agar tidak gantung di executor tertentu
+        local gui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not gui then
+            local t = 0
+            repeat task.wait(0.5); t = t + 0.5
+                gui = LocalPlayer:FindFirstChild("PlayerGui")
+            until gui or t >= 30
+        end
+        if not gui then print("[XiFil BuffCard] PlayerGui tidak ditemukan"); cleanupScan(); return end
+        print("[XiFil BuffCard] PlayerGui OK")
 
         print("[XiFil BuffCard] === MEMULAI PEMANTAUAN AUTO-UPDATE ===")
 
