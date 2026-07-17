@@ -29,8 +29,8 @@ local GameMatchRE    = Services.ReplicatedStorage:WaitForChild("Remotes"):WaitFo
 -- [S02] ENGINE CONFIG & KONSTANTA
 --------------------------------------------------------------------------------
 
-local WORLD_NAMES = { "Starless Forest", "Frozen Valley", "Oathlost Castle" }
-local WORLD_INDEX = { ["Starless Forest"]=1, ["Frozen Valley"]=2, ["Oathlost Castle"]=3 }
+local WORLD_NAMES = { "Starless Forest", "Frozen Valley", "Oathlost Castle", "Tartarus" }
+local WORLD_INDEX = { ["Starless Forest"]=1, ["Frozen Valley"]=2, ["Oathlost Castle"]=3, ["Tartarus"]=4 }
 
 local POSITION_MODES = {
     "Orbit Atas", "Orbit Bawah", "Orbit Samping",
@@ -39,7 +39,7 @@ local POSITION_MODES = {
 }
 
 local ROOM_WORLD_DISPLAY = {
-    "Starless Forest", "Frozen Valley", "Oathlost Castle",
+    "Starless Forest", "Frozen Valley", "Oathlost Castle", "Tartarus",
     "Cave of Crystal", "Cave of Runes", "Abandoned Courtyard",
     "Endless Tower",
 }
@@ -47,6 +47,7 @@ local ROOM_WORLD_KEY = {
     ["Starless Forest"]     = "World1",
     ["Frozen Valley"]       = "World2",
     ["Oathlost Castle"]     = "World3",
+    ["Tartarus"]            = "World4",
     ["Cave of Crystal"]     = "Cave1",
     ["Cave of Runes"]       = "Cave2",
     ["Abandoned Courtyard"] = "Cave3",

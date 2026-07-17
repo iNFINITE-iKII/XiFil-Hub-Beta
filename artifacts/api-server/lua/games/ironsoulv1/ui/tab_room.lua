@@ -43,6 +43,7 @@ local RoomMapping = {
     World1   = {"Room1","Room2","Room3","Room4"},
     World2   = {"Room1","Room2","Room3","Room4"},
     World3   = {"Room1","Room2","Room3","Room4"},
+    World4   = {"Room1","Room2","Room3","Room4"},
     Cave1    = {"Room5","Room6","Room7","Room8"},
     Cave2    = {"Room5","Room6","Room7","Room8"},
     Cave3    = {"Room5","Room6","Room7","Room8"},

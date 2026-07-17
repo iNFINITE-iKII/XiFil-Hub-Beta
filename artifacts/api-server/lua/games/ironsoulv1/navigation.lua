@@ -14,7 +14,7 @@ local DisableAutoFarm = H.DisableAutoFarm
 -- [S07] NAVIGATION ENGINE (MODERN FRAMEWORK)
 -- Logika navigasi diambil dari MODERN Object-Oriented Framework,
 -- diadaptasi penuh untuk sistem nama world dan toggle XiFil Pro V3.
--- World 1 = Starless Forest (idx 1), World 2 = Frozen Valley (idx 2), World 3 = Oathlost Castle (idx 3)
+-- World 1 = Starless Forest (idx 1), World 2 = Frozen Valley (idx 2), World 3 = Oathlost Castle (idx 3), World 4 = Tartarus (idx 4)
 --------------------------------------------------------------------------------
 local Navigation = {}
 
@@ -305,6 +305,57 @@ function Navigation.SearchWorld3(myHRP, myHum)
 
         _G._world3GroundIdx = (idx % total) + 1
         idx = _G._world3GroundIdx
+
+        if CombatEngine.InterruptableStall(0.001, globalBreakCondition) then break end
+        if anyActiveTargetExists() then break end
+    end
+
+    EngineConfig.IsLockDelay = false
+    myHum.PlatformStand = false
+end
+
+
+-- ── World 4 (Tartarus): hardcoded tower positions ──
+-- [HARDCODED POSITIONS] 10 titik koordinat tetap Tartarus diiterasi
+-- berurutan. Indeks dikelola lewat _G._world4GroundIdx (direset ke 1 di awal
+-- setiap sesi farm — lihat startFarmLoop() di farm.lua).
+--
+-- [AUTO-SKIP] Kalau di titik tersebut tidak ada monster (stall 0.001 detik),
+-- langsung lanjut ke titik berikutnya — terus maju sampai ketemu monster,
+-- farm dimatikan, atau world berubah.
+function Navigation.SearchWorld4(myHRP, myHum)
+    if WORLD_INDEX[EngineConfig.SelectedWorld] ~= 4 then return end
+
+    EngineConfig.IsLockDelay = true
+    myHum.PlatformStand = true
+
+    local function globalBreakCondition()
+        return not EngineConfig.AutoFarmActive or anyActiveTargetExists() or checkVictoryUi() or WORLD_INDEX[EngineConfig.SelectedWorld] ~= 4
+    end
+
+    local positions = {
+        Vector3.new(-8815, 205, -1833),
+        Vector3.new(-8891, 210, -1540),
+        Vector3.new(-8713, 204, -1294),
+        Vector3.new(-4111, 541, -1949),
+        Vector3.new(-4449, 531, -1963),
+        Vector3.new( 6136,-187,   592),
+        Vector3.new(-4069, 447,  1557),
+        Vector3.new(-4281, 452,  1586),
+        Vector3.new(-4268, 452,  3176),
+        Vector3.new(-4063, 452,  3148),
+    }
+    local total = #positions
+
+    local idx = _G._world4GroundIdx or 1
+    if idx > total then idx = 1 end
+
+    while not globalBreakCondition() do
+        CombatEngine.ResetPhysics(myHRP)
+        myHRP.CFrame = CFrame.new(positions[idx])
+
+        _G._world4GroundIdx = (idx % total) + 1
+        idx = _G._world4GroundIdx
 
         if CombatEngine.InterruptableStall(0.001, globalBreakCondition) then break end
         if anyActiveTargetExists() then break end

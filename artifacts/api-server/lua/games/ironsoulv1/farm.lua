@@ -180,6 +180,8 @@ local function startFarmLoop()
     _G._world1GroundIdx = 1
     -- [WORLD2 ROOM] Counter indeks Room berurutan untuk World 2 (workspace.World.<room>.Portal.Root.TouchInterest).
     _G._world2RoomIdx = 1
+    -- [WORLD4 GROUND] Counter indeks posisi berurutan untuk World 4 (Tartarus).
+    _G._world4GroundIdx = 1
     -- [CHEST/EGG GUARD]
     -- _worldHasMonster : true setelah GetValidMonsters() mengembalikan hasil non-empty (monster terdeteksi).
     -- _eggSessionDone  : true setelah 1 egg dihancurkan; reset setelah karakter berhasil hit monster.
@@ -353,9 +355,9 @@ local function startFarmLoop()
             if tPart and (not tHum or tHum.Health>0) then
                 -- Simpan posisi monster terakhir (World3 & Endless Tower)
                 if worldIdx==3 then _G._world3LastMonsterPos = tPart.Position end
-                if worldIdx==4 then _G._endlessTowerLastPos  = tPart.Position end
+                if worldIdx==5 then _G._endlessTowerLastPos  = tPart.Position end
                 local _endlessTowerFollowing = false
-                if worldIdx==4 then
+                if worldIdx==5 then
                     if _G._endlessTowerDone then
                         -- Monster pertama wave baru → mulai Fase 1 (4 detik: 1s ikut, 2s diam, 1s ikut)
                         local t = tick()
@@ -382,7 +384,7 @@ local function startFarmLoop()
                         _G._endlessTowerFixedY = nil
                     end
                 end
-                if worldIdx==4 and _endlessTowerFollowing then
+                if worldIdx==5 and _endlessTowerFollowing then
                     -- [ENDLESS TOWER] Fase 1 — 4 detik: 1s ikut → 2s diam → 1s ikut
                     local elapsed = tick() - (_G._endlessTowerFollowStartAt or 0)
                     CombatEngine.ResetPhysics(myHRP)
@@ -402,7 +404,7 @@ local function startFarmLoop()
                         if dir.Magnitude < 0.01 then dir = Vector3.new(1,0,0) end
                         myHRP.CFrame = CFrame.new(fpos, fpos + dir.Unit)
                     end
-                elseif worldIdx==4 then
+                elseif worldIdx==5 then
                     -- [ENDLESS TOWER] Fase 2 — Y-Locked Follow (setelah fase follow selesai):
                     -- Y dikunci di ketinggian sesuai FarmPosition (Orbit Atas/Bawah/Diam Atas/dll),
                     -- sedangkan X dan Z tetap mengikuti monster yang bergerak.
@@ -494,7 +496,7 @@ local function startFarmLoop()
             --     dan Fase 1 (-50) aktif otomatis karena _endlessTowerDone=true sudah terset.
             --   • Setelah delay 10 detik → CFrame ke Portal, ulangi setiap 7 detik
             --     selama masih tidak ada monster (terpisah dari logika Fase 1).
-            if worldIdx==4 then
+            if worldIdx==5 then
                 -- Guard: jangan set _endlessTowerDone=true saat masih dalam Fase 1
                 -- (NPC baru spawn kadang belum punya HumanoidRootPart → GetValidMonsters()
                 -- return 0 sesaat → tanpa guard ini _endlessTowerDone=true akan restart Fase 1)
@@ -593,6 +595,7 @@ local function startFarmLoop()
                 if worldIdx==1 then Navigation.SearchWorld1(myHRP,myHum)
                 elseif worldIdx==2 then Navigation.SearchWorld2(myHRP,myHum)
                 elseif worldIdx==3 then Navigation.SearchWorld3(myHRP,myHum)
+                elseif worldIdx==4 then Navigation.SearchWorld4(myHRP,myHum)
                 end
             elseif noTargetTimer>=3 then
                 noTargetTimer=0  -- reset timer meski tidak search, agar tidak numpuk
