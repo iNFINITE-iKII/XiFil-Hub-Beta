@@ -108,6 +108,7 @@ local EngineConfig = {
     CFrameDelay   = 0.001,
     HitMultiplier = 1,
     IsLockDelay   = false,
+    EndlessTowerResetLock = 5,  -- jeda (detik) antar CFrame ke portal Endless Tower
     AutoSkillActive    = false,
     SkillActive1       = true,
     SkillActive2       = true,

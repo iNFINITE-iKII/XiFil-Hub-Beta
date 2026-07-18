@@ -260,13 +260,12 @@ local function startFarmLoop()
             if not _autoAttackPaused then myHum.PlatformStand=true end
             CombatEngine.ResetPhysics(myHRP)
 
-            -- [ENDLESS TOWER] CFrame ke portal, jeda 3 detik antar CFrame.
-            -- Jika baru habis target → tunggu 2 detik dulu sebelum CFrame pertama.
+            -- [ENDLESS TOWER] CFrame ke portal
             if worldIdx==4 then
                 if _G._endlessTowerHadTarget then
-                    -- Target baru saja habis: set delay 2 detik
+                    -- Target baru saja habis: tunggu sesuai Reset Lock sebelum CFrame pertama
                     _G._endlessTowerHadTarget    = false
-                    _G._endlessTowerNextCFrameAt = tick() + 2
+                    _G._endlessTowerNextCFrameAt = tick() + (EngineConfig.EndlessTowerResetLock or 5)
                 end
                 if tick() >= (_G._endlessTowerNextCFrameAt or 0) then
                     pcall(function()
@@ -274,7 +273,7 @@ local function startFarmLoop()
                         CombatEngine.ResetPhysics(myHRP)
                         myHRP.CFrame = fxPart.CFrame
                     end)
-                    _G._endlessTowerNextCFrameAt = tick() + 3  -- CFrame berikutnya 3 detik lagi
+                    _G._endlessTowerNextCFrameAt = tick() + (EngineConfig.EndlessTowerResetLock or 5)
                 end
             end
 

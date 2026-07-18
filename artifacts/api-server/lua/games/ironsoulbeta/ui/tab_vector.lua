@@ -50,6 +50,11 @@ _G.RadiusInput = CreateInputUI(VectorPage, "Orbit Radius", EngineConfig.OrbitRad
 CreateButton(VectorPage, "🎯 Dodge Boss Skil (20)",  function() EngineConfig.OrbitRadius = 20;  _G.RadiusInput:SetValue(20)  end, "btnDodge20")
 CreateButton(VectorPage, "🎯 Dodge Boss Skil(200)", function() EngineConfig.OrbitRadius = 200; _G.RadiusInput:SetValue(200) end, "btnDodge200")
 
+CreateSection(VectorPage, "Reset Lock — Endless Tower", "secResetLock")
+_G.ETResetLockInput = CreateInputUI(VectorPage, "Reset Lock Delay (s)", EngineConfig.EndlessTowerResetLock, true, function(v)
+    EngineConfig.EndlessTowerResetLock = tonumber(v) or 5
+end)
+
 CreateSection(VectorPage, "Kinematic System Parameters", "secKinematic")
 _G.HeightInput       = CreateInputUI(VectorPage, "Height Normal Target (Y)", EngineConfig.StandHeight,        true,  function(v) EngineConfig.StandHeight        = tonumber(v) or 20    end)
 _G.BossHeightInput   = CreateInputUI(VectorPage, "Height Boss Target (Y)",   EngineConfig.BossHeight,         true,  function(v) EngineConfig.BossHeight          = tonumber(v) or 25    end)
